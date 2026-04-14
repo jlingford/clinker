@@ -1,0 +1,5 @@
+clinker/__pycache__/
+clinker.egg-info/
+logs/
+input/
+output/
