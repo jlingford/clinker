@@ -17,12 +17,13 @@ from typing import TextIO, Dict, List
 from clinker import __version__, align
 from clinker.plot import plot_clusters, plot_data
 from clinker.classes import find_files, parse_files
+from clinker.trim import trim_cluster_files
 
 
 logging.basicConfig(
     level=logging.INFO,
     format="[%(asctime)s] %(levelname)s - %(message)s",
-    datefmt="%H:%M:%S"
+    datefmt="%H:%M:%S",
 )
 LOG = logging.getLogger(__name__)
 
@@ -46,7 +47,9 @@ def parse_range(string):
         scaffold, coordinates = string.split(":")
         start, end = coordinates.split("-")
     except ValueError as e:
-        raise ValueError("Expected format scaffold:start-stop (e.g. scaf_1:100-3000)") from e
+        raise ValueError(
+            "Expected format scaffold:start-stop (e.g. scaf_1:100-3000)"
+        ) from e
     if not start.isdigit() or not end.isdigit():
         raise TypeError("Expected range values to be type int")
     return scaffold, int(start), int(end)
@@ -68,7 +71,7 @@ def parse_gene_functions(fp: TextIO) -> Dict[str, List[str]]:
     """Parses gene functions from a table.
 
     Gene        Function
-    GENE_001    Cytochrome P450 
+    GENE_001    Cytochrome P450
     GENE_002    Methyltransferase
     ...
     """
@@ -113,6 +116,9 @@ def clinker(
     colour_map=None,
     set_origin=False,
     as_separate_clusters=False,
+    trim=None,
+    trim_padding=0,
+    trim_suffix="_trimmed",
 ):
     """Entry point for running the script."""
     LOG.info("Starting clinker")
@@ -135,7 +141,9 @@ def clinker(
             try:
                 globaligner = align.Globaligner.from_json(fp)
             except Exception:
-                LOG.exception("Failed to load session, is '%s' a clinker session?", session) 
+                LOG.exception(
+                    "Failed to load session, is '%s' a clinker session?", session
+                )
         if files:
             paths = find_files(files)
             if not paths:
@@ -159,7 +167,7 @@ def clinker(
                 LOG.info("Opening empty clinker web app...")
                 plot_data(
                     dict(clusters=[], links=[], groups=[]),
-                    output=None if plot is True else plot
+                    output=None if plot is True else plot,
                 )
             else:
                 LOG.error("No files provided!")
@@ -193,7 +201,7 @@ def clinker(
             alignment_headers=not hide_alignment_headers,
         )
         if output:
-            if (output and Path(output).exists() and not force):
+            if output and Path(output).exists() and not force:
                 print(summary)
                 LOG.warn("File %s already exists but --force was not specified", output)
             else:
@@ -227,6 +235,21 @@ def clinker(
             use_file_order=use_file_order,
         )
 
+    # trim the genbank files to conserved/"linked" regions
+    if trim:
+        if not globaligner.alignments:
+            LOG.warning("No alignments were generated, cannot trim")
+        else:
+            LOG.info("Trimming GenBank files...")
+            trim_cluster_files(
+                paths,
+                globaligner,
+                output_dir=trim,
+                padding=trim_padding,
+                suffix=trim_suffix,
+                force=force,
+            )
+
     LOG.info("Done!")
     return globaligner
 
@@ -249,15 +272,17 @@ def get_parser():
         "Save an alignment session for later:\n"
         "  $ clinker files/*.gbk -s session.json\n\n"
         "Save alignments to file, in comma-delimited format, with 4 decimal places:\n"
-        "  $ clinker files/*.gbk -o alignments.csv -dl \",\" -dc 4\n\n"
+        '  $ clinker files/*.gbk -o alignments.csv -dl "," -dc 4\n\n'
         "Generate visualisation:\n"
         "  $ clinker files/*.gbk -p\n\n"
         "Save visualisation as a static HTML document:\n"
         "  $ clinker files/*.gbk -p plot.html\n\n"
         "Cameron Gilchrist, 2020",
-        formatter_class=argparse.RawDescriptionHelpFormatter
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--version", action='version', version=f"clinker v{__version__}")
+    parser.add_argument(
+        "--version", action="version", version=f"clinker v{__version__}"
+    )
 
     inputs = parser.add_argument_group("Input options")
     inputs.add_argument("files", help="Gene cluster GenBank files", nargs="*")
@@ -274,13 +299,13 @@ def get_parser():
         "--gene_functions",
         help="2-column CSV file containing gene functions, used to build gene groups"
         " from same function instead of sequence similarity (e.g. GENE_001,PKS-NRPS).",
-        type=argparse.FileType("r")
+        type=argparse.FileType("r"),
     )
     inputs.add_argument(
         "-cm",
         "--colour_map",
         help="2-column CSV file containing gene functions and colours (e.g. GENE_001,#FF0000).",
-        type=argparse.FileType("r")
+        type=argparse.FileType("r"),
     )
     inputs.add_argument(
         "-dso",
@@ -308,7 +333,7 @@ def get_parser():
         "--identity",
         help="Minimum alignment sequence identity [default: 0.3]",
         type=float,
-        default=0.3
+        default=0.3,
     )
     alignment.add_argument(
         "-j",
@@ -320,8 +345,15 @@ def get_parser():
 
     output = parser.add_argument_group("Output options")
     output.add_argument("-s", "--session", help="Path to clinker session")
-    output.add_argument("-ji", "--json_indent", type=int, help="Number of spaces to indent JSON [default: none]")
-    output.add_argument("-f", "--force", help="Overwrite previous output file", action="store_true")
+    output.add_argument(
+        "-ji",
+        "--json_indent",
+        type=int,
+        help="Number of spaces to indent JSON [default: none]",
+    )
+    output.add_argument(
+        "-f", "--force", help="Overwrite previous output file", action="store_true"
+    )
     output.add_argument("-o", "--output", help="Save alignments to file")
     output.add_argument(
         "-p",
@@ -331,10 +363,19 @@ def get_parser():
         default=False,
         help="Plot cluster alignments using clustermap.js. If a path is given,"
         " clinker will generate a portable HTML file at that path. Otherwise,"
-        " the plot will be served dynamically using Python's HTTP server."
+        " the plot will be served dynamically using Python's HTTP server.",
     )
-    output.add_argument("-dl", "--delimiter", help="Character to delimit output by [default: human readable]")
-    output.add_argument("-dc", "--decimals", help="Number of decimal places in output [default: 2]", default=2)
+    output.add_argument(
+        "-dl",
+        "--delimiter",
+        help="Character to delimit output by [default: human readable]",
+    )
+    output.add_argument(
+        "-dc",
+        "--decimals",
+        help="Number of decimal places in output [default: 2]",
+        default=2,
+    )
     output.add_argument(
         "-hl",
         "--hide_link_headers",
@@ -347,14 +388,38 @@ def get_parser():
         help="Hide alignment cluster name headers",
         action="store_true",
     )
-    output.add_argument("-mo", "--matrix_out", help="Save cluster similarity matrix to file")
+    output.add_argument(
+        "-mo", "--matrix_out", help="Save cluster similarity matrix to file"
+    )
 
     viz = parser.add_argument_group("Visualisation options")
     viz.add_argument(
         "-ufo",
         "--use_file_order",
         action="store_true",
-        help="Display clusters in order of input files"
+        help="Display clusters in order of input files",
+    )
+
+    trim = parser.add_argument_group("Trimming options")
+    trim.add_argument(
+        "-t",
+        "--trim",
+        help="Trim GenBank records to the aligned region and write to the given directory",
+        default=None,
+        metavar="DIR",
+    )
+    trim.add_argument(
+        "-tp",
+        "--trim_padding",
+        help="Padding (bp) to add on either side of the aligned region when trimming [default: 0]",
+        type=int,
+        default=0,
+    )
+    trim.add_argument(
+        "-ts",
+        "--trim_suffix",
+        help="Suffix to append to trimmed output filenames [default: _trimmed]",
+        default="_trimmed",
     )
 
     return parser
@@ -384,6 +449,9 @@ def main():
         colour_map=args.colour_map,
         set_origin=not args.dont_set_origin,
         as_separate_clusters=args.as_separate_clusters,
+        trim=args.trim,
+        trim_padding=args.trim_padding,
+        trim_suffix=args.trim_suffix,
     )
 
 
