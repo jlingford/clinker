@@ -1,16 +1,24 @@
 #!/usr/bin/env python3
 """
 Trim GenBank records to the aligned region of each gene cluster.
+
+This is a a custom addition to this fork of clinker.
 """
 
 import logging
 from pathlib import Path
 from Bio import SeqIO
 
+from clinker.align import Globaligner
+
 LOG = logging.getLogger(__name__)
 
 
-def get_aligned_spans(globaligner, padding=0):
+# =============================================================================
+def get_aligned_spans(
+    globaligner: Globaligner,
+    padding: int = 0,
+) -> dict[str, tuple[int, int]]:
     """For each locus in each cluster, find the coordinate span
     covered by genes that participate in at least one alignment link.
 
@@ -52,7 +60,13 @@ def get_aligned_spans(globaligner, padding=0):
     return spans
 
 
-def trim_genbank_file(input_path, spans, output_path, force=False):
+# =============================================================================
+def trim_genbank_file(
+    input_path: str | Path,
+    spans: dict[str, tuple[int, int]],
+    output_path: str | Path,
+    force: bool = False,
+) -> None:
     """Trim records in a GenBank file to the aligned spans and write output.
 
     ---
@@ -86,9 +100,15 @@ def trim_genbank_file(input_path, spans, output_path, force=False):
     LOG.info("  Written: %s", output_path)
 
 
+# =============================================================================
 def trim_cluster_files(
-    paths, globaligner, output_dir, padding=0, suffix="_trimmed", force=False
-):
+    paths: str | Path,
+    globaligner: Globaligner,
+    output_dir: str | Path,
+    padding: int = 0,
+    suffix: str = "_trimmed",
+    force: bool = False,
+) -> None:
     """Trim all input GenBank files based on alignment results.
 
     ---
