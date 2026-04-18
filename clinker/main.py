@@ -116,9 +116,9 @@ def clinker(
     colour_map=None,
     set_origin=False,
     as_separate_clusters=False,
-    trim=None,
-    trim_padding=0,
-    trim_suffix="_trimmed",
+    trim=None,  # Trimming
+    trim_padding=0,  # Trimming
+    trim_suffix=".trimmed",  # Trimming
 ):
     """Entry point for running the script."""
     LOG.info("Starting clinker")
@@ -212,7 +212,8 @@ def clinker(
             print(summary)
         if matrix_out:
             LOG.info("Writing synteny matrix to: %s", matrix_out)
-            matrix = globaligner.format_matrix(normalise=True, as_distance=True)
+            # matrix = globaligner.format_matrix(normalise=True, as_distance=False)
+            matrix = globaligner.format_matrix(normalise=False, as_distance=True)
             with open(matrix_out, "w") as fp:
                 fp.write(matrix)
 
@@ -418,8 +419,8 @@ def get_parser():
     trim.add_argument(
         "-ts",
         "--trim_suffix",
-        help="Suffix to append to trimmed output filenames [default: _trimmed]",
-        default="_trimmed",
+        help="Suffix to append to trimmed output filenames [default: .trimmed.gbk]",
+        default=".trimmed",
     )
 
     return parser
@@ -449,9 +450,9 @@ def main():
         colour_map=args.colour_map,
         set_origin=not args.dont_set_origin,
         as_separate_clusters=args.as_separate_clusters,
-        trim=args.trim,
-        trim_padding=args.trim_padding,
-        trim_suffix=args.trim_suffix,
+        trim=args.trim,  # Trimming
+        trim_padding=args.trim_padding,  # Trimming
+        trim_suffix=args.trim_suffix,  # Trimming
     )
 
 

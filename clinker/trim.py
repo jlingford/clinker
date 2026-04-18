@@ -106,7 +106,7 @@ def trim_cluster_files(
     globaligner: Globaligner,
     output_dir: str | Path,
     padding: int = 0,
-    suffix: str = "_trimmed",
+    suffix: str = ".trimmed",
     force: bool = False,
 ) -> None:
     """Trim all input GenBank files based on alignment results.
