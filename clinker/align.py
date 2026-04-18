@@ -67,7 +67,7 @@ def assign_groups(links, threshold=0.3):
         if link.identity < threshold:
             continue
         found = False
-        for (i, group) in enumerate(groups):
+        for i, group in enumerate(groups):
             if link.query in group or link.target in group:
                 found = True
             if found:
@@ -89,8 +89,7 @@ def get_pairs(cluster):
     for locus in cluster.loci:
         total = len(locus.genes) - 1
         pairs.extend(
-            (gene._group for gene in locus.genes[i:i+2])
-            for i in range(total)
+            (gene._group for gene in locus.genes[i : i + 2]) for i in range(total)
         )
     return pairs
 
@@ -120,7 +119,7 @@ def compute_identity(alignment):
         {"D", "E", "N", "Q"},
         {"P"},
     ]
-                
+
     if biopython_version >= "1.80":
         # Default format changed as of BioPython v1.80
         # https://github.com/biopython/biopython/issues/4183
@@ -151,7 +150,7 @@ def compute_identity(alignment):
     return matches / length, (matches + similar) / length
 
 
-def extend_matrix_alphabet(matrix, codes='BXZJUO'):
+def extend_matrix_alphabet(matrix, codes="BXZJUO"):
     """Extends the alphabet of a given substitution matrix.
 
     Primarily for adding extended IUPAC codes to a matrix which does
@@ -160,7 +159,7 @@ def extend_matrix_alphabet(matrix, codes='BXZJUO'):
     """
     missing_codes = set(codes).difference(matrix.alphabet)
     if missing_codes:
-        missing_codes = ''.join(missing_codes)
+        missing_codes = "".join(missing_codes)
         matrix = matrix.select(matrix.alphabet + missing_codes)
     return matrix
 
@@ -227,22 +226,15 @@ class Globaligner(Serializer):
                 for uid, cluster in self.clusters.items()
             },
             "loci": {
-                uid: locus.to_dict(uids_only=True)
-                for uid, locus in self._loci.items()
+                uid: locus.to_dict(uids_only=True) for uid, locus in self._loci.items()
             },
-            "genes": {
-                uid: gene.to_dict()
-                for uid, gene in self._genes.items()
-            },
+            "genes": {uid: gene.to_dict() for uid, gene in self._genes.items()},
             "groups": [group.to_dict() for group in self.groups],
             "alignments": {
                 uid: alignment.to_dict(uids_only=True)
                 for uid, alignment in self.alignments.items()
             },
-            "links": {
-                uid: link.to_dict()
-                for uid, link in self._links.items()
-            },
+            "links": {uid: link.to_dict() for uid, link in self._links.items()},
         }
 
     @classmethod
@@ -320,15 +312,15 @@ class Globaligner(Serializer):
         """
         clusters = [cluster.to_dict() for cluster in self.clusters.values()]
         return {
-            "clusters": clusters if use_file_order else [
-                clusters[i] for i in self.order(i=i, method=method)
-            ],
+            "clusters": clusters
+            if use_file_order
+            else [clusters[i] for i in self.order(i=i, method=method)],
             "links": [
                 link.to_dict()
                 for alignment in self.alignments.values()
                 for link in alignment.links
             ],
-            "groups": [group.to_dict() for group in self.groups]
+            "groups": [group.to_dict() for group in self.groups],
         }
 
     @property
@@ -366,7 +358,9 @@ class Globaligner(Serializer):
         # Defaults to BLOSUM62 when none or invalid matrix specified.
         matrix = config.pop("substitution_matrix", "BLOSUM62")
         if matrix not in substitution_matrices.load():
-            LOG.warning("Invalid substitution matrix '(%s)', defaulting to BLOSUM62", matrix)
+            LOG.warning(
+                "Invalid substitution matrix '(%s)', defaulting to BLOSUM62", matrix
+            )
             matrix = "BLOSUM62"
         aligner.substitution_matrix = substitution_matrices.load(matrix)
 
@@ -375,7 +369,7 @@ class Globaligner(Serializer):
         # Extended IUPAC codes (BXZJUO) are added to mitigate this.
         aligner.substitution_matrix = extend_matrix_alphabet(
             aligner.substitution_matrix,
-            codes='BXZJUO-.',
+            codes="BXZJUO-.",
         )
 
         for k, v in config.items():
@@ -387,8 +381,9 @@ class Globaligner(Serializer):
                 if not geneA.translation or not geneB.translation:
                     continue
                 try:
-                    aln = aligner.align(geneA.translation.strip(),
-                                        geneB.translation.strip())
+                    aln = aligner.align(
+                        geneA.translation.strip(), geneB.translation.strip()
+                    )
                 except:
                     raise
                 identity, similarity = compute_identity(aln[0])
@@ -413,9 +408,7 @@ class Globaligner(Serializer):
 
         with Pool(jobs) as pool:
             _align_clusters = partial(
-                self._align_clusters,
-                self.aligner_config,
-                cutoff=cutoff
+                self._align_clusters, self.aligner_config, cutoff=cutoff
             )
             alignments = pool.starmap(_align_clusters, pairs_to_align)
 
@@ -440,10 +433,10 @@ class Globaligner(Serializer):
         return uids
 
     def build_gene_groups(
-            self,
-            functions: Optional[Dict[str, List[str]]]=None,
-            colours: Optional[Dict[str, str]]=None
-        ) -> None:
+        self,
+        functions: Optional[Dict[str, List[str]]] = None,
+        colours: Optional[Dict[str, str]] = None,
+    ) -> None:
         """Builds gene groups based on functions and stored gene-gene links.
 
         `functions` maps genes to user-assigned functions; keys should correspond
@@ -473,7 +466,11 @@ class Globaligner(Serializer):
             ds.union(link.query.uid, link.target.uid)
         for genes in ds.itersets():
             genes = set(genes)
-            overlaps = [i for i, _ in enumerate(self.groups) if not genes.isdisjoint(group.genes)]
+            overlaps = [
+                i
+                for i, _ in enumerate(self.groups)
+                if not genes.isdisjoint(group.genes)
+            ]
             if not overlaps:
                 group = Group(label=f"Group {len(self.groups)}", genes=genes)
                 self.groups.append(group)
@@ -494,14 +491,13 @@ class Globaligner(Serializer):
         Refer to BioPython documentation for these.
         """
         valid_attributes = {
-            x for x in dir(Align.PairwiseAligner)
-            if not x.startswith("_")
+            x for x in dir(Align.PairwiseAligner) if not x.startswith("_")
         }
         invalid_keys = set(kwargs.keys()) - valid_attributes
         if invalid_keys:
             raise ValueError(
-                f'invalid attributes for the BioPython Align.PairwiseAligner'
-                f"class: { ', '.join(map(repr, sorted(invalid_keys))) }"
+                f"invalid attributes for the BioPython Align.PairwiseAligner"
+                f"class: {', '.join(map(repr, sorted(invalid_keys)))}"
             )
         self.aligner_config.update(kwargs)
 
@@ -573,7 +569,7 @@ class Globaligner(Serializer):
         contiguity = compare_pairs(one_pairs, two_pairs)
         return homology + i * contiguity
 
-    def matrix(self, i=0.5, normalise=False, as_distance=False):
+    def matrix(self, i=0.5, normalise=True, as_distance=True):
         """Generates a synteny score matrix of all aligned clusters.
 
         Arguments:
@@ -598,7 +594,9 @@ class Globaligner(Serializer):
         if as_distance:
             maximum = 1 if normalise else matrix.max()
             matrix = maximum - matrix
-            np.fill_diagonal(matrix, 0)
+            np.fill_diagonal(
+                matrix, 0
+            )  # WARN: diagonal must be zero in distance matrix
         return matrix
 
     def format_matrix(self, delimiter=",", **kwargs):
@@ -645,7 +643,7 @@ class Alignment(Serializer):
             "uid": self.uid,
             "query": self.query.uid if uids_only else self.query.to_dict(),
             "target": self.target.uid if uids_only else self.target.to_dict(),
-            "links": [link.uid if uids_only else link.to_dict() for link in self.links]
+            "links": [link.uid if uids_only else link.to_dict() for link in self.links],
         }
 
     @classmethod
@@ -690,10 +688,7 @@ class Alignment(Serializer):
     def add_link(self, query, target, identity, similarity):
         """Instantiate a new Link from a Gene alignment and save."""
         link = Link(
-            query=query,
-            target=target,
-            identity=identity,
-            similarity=similarity
+            query=query, target=target, identity=identity, similarity=similarity
         )
         self.links.append(link)
 
@@ -701,7 +696,9 @@ class Alignment(Serializer):
 class Link(Serializer):
     """An alignment link between two Gene objects."""
 
-    def __init__(self, uid=None, query=None, target=None, identity=None, similarity=None):
+    def __init__(
+        self, uid=None, query=None, target=None, identity=None, similarity=None
+    ):
         self.uid = uid if uid else str(uuid.uuid4())
         self.query = query
         self.target = target
