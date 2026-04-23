@@ -68,13 +68,15 @@ def trim_genbank_file(
     force: bool = False,
 ) -> None:
     """Trim records in a GenBank file to the aligned spans and write output.
-
     ---
     Args:
         input_path (str|Path): path to input GenBank file
         spans (dict): mapping of record.name -> (start, end)
         output_path (str|Path): path to write trimmed GenBank file
         force (bool): overwrite output if it already exists
+
+    Returns:
+        None
     """
     input_path = Path(input_path)
     output_path = Path(output_path)
@@ -102,7 +104,7 @@ def trim_genbank_file(
 
 # =============================================================================
 def trim_cluster_files(
-    paths: str | Path,
+    paths: list[str | Path],
     globaligner: Globaligner,
     output_dir: str | Path,
     padding: int = 0,
@@ -110,7 +112,6 @@ def trim_cluster_files(
     force: bool = False,
 ) -> None:
     """Trim all input GenBank files based on alignment results.
-
     ---
     Args:
         paths (list): input file paths (same list passed to parse_files)
@@ -119,6 +120,9 @@ def trim_cluster_files(
         padding (int): bp padding on either side of aligned region
         suffix (str): suffix appended to each output filename stem
         force (bool): overwrite existing output files
+
+    Returns:
+        None
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
