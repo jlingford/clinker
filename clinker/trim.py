@@ -21,13 +21,12 @@ def get_aligned_spans(
 ) -> dict[str, tuple[int, int]]:
     """For each locus in each cluster, find the coordinate span
     covered by genes that participate in at least one alignment link.
-
     ---
     Args:
         globaligner (Globaligner): completed Globaligner instance
         padding (int): bp to add on either side of the aligned span
     Returns:
-        dict mapping locus.name -> (trim_start, trim_end)
+        dict mapping locus.name to tuple(trim_start, trim_end)
     """
     linked_gene_uids = set()
     for alignment in globaligner.alignments.values():
