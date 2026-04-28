@@ -20,6 +20,7 @@ from clinker import __version__, align
 from clinker.plot import plot_clusters, plot_data
 from clinker.classes import find_files, parse_files
 from clinker.trim import trim_cluster_files
+from clinker.svg import render_svg
 
 
 # =============================================================================
@@ -63,6 +64,7 @@ class Args:
     trim: Path  # TODO: check
     trim_padding: int
     trim_suffix: str
+    svg: bool
 
 
 def get_parser() -> Args:
@@ -75,20 +77,20 @@ def get_parser() -> Args:
         " It performs pairwise local or global alignments between every sequence"
         " in every unique pair of clusters and generates interactive, to-scale comparison figures"
         " using the clustermap.js library.",
-        epilog="Example usage\n-------------\n"
-        "Align clusters, plot results and print scores to screen:\n"
-        "  $ clinker files/*.gbk\n\n"
-        "Only save gene-gene links when identity is over 50%:\n"
-        "  $ clinker files/*.gbk -i 0.5\n\n"
-        "Save an alignment session for later:\n"
-        "  $ clinker files/*.gbk -s session.json\n\n"
-        "Save alignments to file, in comma-delimited format, with 4 decimal places:\n"
-        '  $ clinker files/*.gbk -o alignments.csv -dl "," -dc 4\n\n'
-        "Generate visualisation:\n"
-        "  $ clinker files/*.gbk -p\n\n"
-        "Save visualisation as a static HTML document:\n"
-        "  $ clinker files/*.gbk -p plot.html\n\n"
-        "Cameron Gilchrist, 2020",
+        # epilog="Example usage\n-------------\n"
+        # "Align clusters, plot results and print scores to screen:\n"
+        # "  $ clinker files/*.gbk\n\n"
+        # "Only save gene-gene links when identity is over 50%:\n"
+        # "  $ clinker files/*.gbk -i 0.5\n\n"
+        # "Save an alignment session for later:\n"
+        # "  $ clinker files/*.gbk -s session.json\n\n"
+        # "Save alignments to file, in comma-delimited format, with 4 decimal places:\n"
+        # '  $ clinker files/*.gbk -o alignments.csv -dl "," -dc 4\n\n'
+        # "Generate visualisation:\n"
+        # "  $ clinker files/*.gbk -p\n\n"
+        # "Save visualisation as a static HTML document:\n"
+        # "  $ clinker files/*.gbk -p plot.html\n\n"
+        # "Cameron Gilchrist, 2020",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
@@ -101,7 +103,6 @@ def get_parser() -> Args:
     inputs.add_argument(
         "files",
         nargs="*",
-        required=False,
         help="Gene cluster GenBank files",
     )
     inputs.add_argument(
@@ -174,7 +175,7 @@ def get_parser() -> Args:
 
     output = parser.add_argument_group("Output options")
     output.add_argument(
-        "-s",
+        # "-s",
         "--session",
         help="Path to clinker session",
     )
@@ -244,6 +245,15 @@ def get_parser() -> Args:
         action="store_true",
         help="Display clusters in order of input files",
     )
+    viz.add_argument(
+        "-s",
+        "--svg",
+        type=Path,
+        metavar="SVG_PATH",
+        required=False,
+        help="Path to write an svg image of the clinker results."
+        " Requires the -p|--plot option to be passed as well.",
+    )
 
     trim = parser.add_argument_group("Trimming options")
     trim.add_argument(
@@ -271,7 +281,7 @@ def get_parser() -> Args:
     args = Args(**vars(parser.parse_args()))
 
     # check inputs
-    if not args.files or not args.file_list:
+    if not (args.files or args.file_list):
         parser.error(
             "No input files provided. Please pass files as positional args or with --file_list"
         )
@@ -357,7 +367,8 @@ def parse_colour_map(fp: TextIO) -> Dict[str, str]:
 # Main functions
 # ==============================================================================
 def clinker(
-    files,
+    args: Args,
+    files=None,
     file_list=None,
     session=None,
     identity=0.3,
@@ -504,6 +515,13 @@ def clinker(
             output=None if plot is True else plot,
             use_file_order=use_file_order,
         )
+        render_svg(
+            globaligner,
+            output=args.svg,
+            use_file_order=use_file_order,
+            show_gene_labels=False,
+            identity_threshold=0.3,
+        )
 
     # trim the genbank files to conserved/"linked" regions
     if trim:
@@ -531,7 +549,8 @@ def main():
 
     # run clinker
     clinker(
-        args.files,
+        args=args,
+        files=args.files,
         file_list=args.file_list,
         session=args.session,
         json_indent=args.json_indent,
