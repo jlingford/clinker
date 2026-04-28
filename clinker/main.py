@@ -65,6 +65,7 @@ class Args:
     trim_padding: int
     trim_suffix: str
     svg: bool
+    anchor_target_genes: bool
 
 
 def get_parser() -> Args:
@@ -254,6 +255,13 @@ def get_parser() -> Args:
         help="Path to write an svg image of the clinker results."
         " Requires the -p|--plot option to be passed as well.",
     )
+    viz.add_argument(
+        "-an",
+        "--anchor_target_genes",
+        action="store_true",
+        help="Visually align all target genes on the same x-axis position and point in the same direction in the svg."
+        " NOTE: assumes target genes can be parsed from the file list",
+    )
 
     trim = parser.add_argument_group("Trimming options")
     trim.add_argument(
@@ -361,6 +369,23 @@ def parse_colour_map(fp: TextIO) -> Dict[str, str]:
     for function, colour in csv.reader(fp):
         colours[function] = colour
     return colours
+
+
+def parse_target_anchor_genes(file_list: list[str]) -> dict[str, str]:
+    """Parses target genes from input file list.
+    Should be of the dict format:
+
+    anchor_map = {"cluster": "gene_target"}
+
+    where cluster is the filepath stem, and gene_target is the final field after "___"
+    """
+    anchor_map: dict[str, str] = {}
+    for file in file_list:
+        file = Path(file)
+        cluster = file.stem
+        gene_target = file.name.removesuffix("".join(file.suffixes)).split("___")[-1]
+        anchor_map.update({cluster: gene_target})
+    return anchor_map
 
 
 # ==============================================================================
@@ -515,12 +540,16 @@ def clinker(
             output=None if plot is True else plot,
             use_file_order=use_file_order,
         )
+        if args.anchor_target_genes:
+            LOG.info("Parsing target genes for anchoring from file list")
+            anchor_map = parse_target_anchor_genes(file_list=files)
         render_svg(
             globaligner,
             output=args.svg,
             use_file_order=use_file_order,
             show_gene_labels=False,
             identity_threshold=0.3,
+            anchor_map=anchor_map,
         )
 
     # trim the genbank files to conserved/"linked" regions
