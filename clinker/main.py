@@ -3,7 +3,8 @@
 """
 Command line interface
 
-Cameron Gilchrist
+Original: Cameron Gilchrist
+Forked: James Lingford
 """
 
 import argparse
@@ -12,13 +13,18 @@ import csv
 
 from pathlib import Path
 from collections import defaultdict
-from typing import TextIO, Dict, List
+from typing import TextIO, Dict, List, Any
+from dataclasses import dataclass
 
 from clinker import __version__, align
 from clinker.plot import plot_clusters, plot_data
 from clinker.classes import find_files, parse_files
 from clinker.trim import trim_cluster_files
 
+
+# =============================================================================
+# Global config
+# =============================================================================
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,6 +34,258 @@ logging.basicConfig(
 LOG = logging.getLogger(__name__)
 
 
+# =============================================================================
+# CLI parser
+# =============================================================================
+@dataclass
+class Args:
+    files: Path
+    file_list: Path
+    session: Path
+    ranges: str
+    gene_functions: TextIO
+    colour_map: TextIO
+    dont_set_origin: bool
+    as_separate_clusters: bool
+    no_align: bool
+    identity: float
+    cpu: int
+    json_indent: int
+    force: bool
+    output: Any  # TODO: ?
+    plot: Any  # TODO: ?
+    delimiter: str
+    decimals: int
+    hide_link_headers: bool
+    hide_aln_headers: bool
+    matrix_out: Any  # TODO: ?
+    use_file_order: bool
+    trim: Path  # TODO: check
+    trim_padding: int
+    trim_suffix: str
+
+
+def get_parser() -> Args:
+    """Creates an ArgumentParser object."""
+    parser = argparse.ArgumentParser(
+        "clinker",
+        description="clinker: Automatic creation of publication-ready"
+        " gene cluster comparison figures.\n\n"
+        "clinker generates gene cluster comparison figures from GenBank files."
+        " It performs pairwise local or global alignments between every sequence"
+        " in every unique pair of clusters and generates interactive, to-scale comparison figures"
+        " using the clustermap.js library.",
+        epilog="Example usage\n-------------\n"
+        "Align clusters, plot results and print scores to screen:\n"
+        "  $ clinker files/*.gbk\n\n"
+        "Only save gene-gene links when identity is over 50%:\n"
+        "  $ clinker files/*.gbk -i 0.5\n\n"
+        "Save an alignment session for later:\n"
+        "  $ clinker files/*.gbk -s session.json\n\n"
+        "Save alignments to file, in comma-delimited format, with 4 decimal places:\n"
+        '  $ clinker files/*.gbk -o alignments.csv -dl "," -dc 4\n\n'
+        "Generate visualisation:\n"
+        "  $ clinker files/*.gbk -p\n\n"
+        "Save visualisation as a static HTML document:\n"
+        "  $ clinker files/*.gbk -p plot.html\n\n"
+        "Cameron Gilchrist, 2020",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"clinker v{__version__}",
+    )
+
+    inputs = parser.add_argument_group("Input options")
+    inputs.add_argument(
+        "files",
+        nargs="*",
+        required=False,
+        help="Gene cluster GenBank files",
+    )
+    inputs.add_argument(
+        "-fl",
+        "--file_list",
+        type=Path,
+        required=False,
+        help="Path to text file containing list of GenBank filepaths."
+        " Filepaths should be absolute paths and one per line.",
+    )
+    inputs.add_argument(
+        "-r",
+        "--ranges",
+        nargs="+",
+        required=False,
+        help="Scaffold extraction ranges. If a range is specified, only features within"
+        " the range will be extracted from the scaffold. Ranges should be formatted"
+        " like: scaffold:start-end (e.g. scaffold_1:15000-40000)",
+    )
+    inputs.add_argument(
+        "-gf",
+        "--gene_functions",
+        type=Path,
+        required=False,
+        help="2-column CSV file containing gene functions, used to build gene groups"
+        " from same function instead of sequence similarity (e.g. GENE_001,PKS-NRPS).",
+    )
+    inputs.add_argument(
+        "-cm",
+        "--colour_map",
+        type=Path,
+        required=False,
+        help="2-column CSV file containing gene functions and colours (e.g. GENE_001,#FF0000).",
+    )
+    inputs.add_argument(
+        "-dso",
+        "--dont_set_origin",
+        action="store_true",
+        help="Don't fix features which cross the origin in circular sequences (GenBank format only)",
+    )
+    inputs.add_argument(
+        "-asc",
+        "--as_separate_clusters",
+        action="store_true",
+        help="Records will be parsed into separate clusters. "
+        "Enable this option when the GenBank file you downloaded from NCBI contains multiple sequences.",
+    )
+
+    alignment = parser.add_argument_group("Alignment options")
+    alignment.add_argument(
+        "-na",
+        "--no_align",
+        action="store_true",
+        help="Do not align clusters",
+    )
+    alignment.add_argument(
+        "-i",
+        "--identity",
+        help="Minimum alignment sequence identity [default: 0.3]",
+        type=float,
+        default=0.3,
+    )
+    alignment.add_argument(
+        "-C",
+        "--cpu",
+        help="Number of alignments to run in parallel (0 to use the number of CPUs) [default: 0]",
+        type=int,
+        default=0,
+    )
+
+    output = parser.add_argument_group("Output options")
+    output.add_argument(
+        "-s",
+        "--session",
+        help="Path to clinker session",
+    )
+    output.add_argument(
+        "-ji",
+        "--json_indent",
+        type=int,
+        help="Number of spaces to indent JSON [default: none]",
+    )
+    output.add_argument(
+        "-f",
+        "--force",
+        action="store_true",
+        help="Overwrite previous output file",
+    )
+    output.add_argument(
+        "-o",
+        "--output",
+        help="Save alignments to file",
+    )
+    output.add_argument(
+        "-p",
+        "--plot",
+        nargs="?",
+        const=True,
+        default=False,
+        help="Plot cluster alignments using clustermap.js. If a path is given,"
+        " clinker will generate a portable HTML file at that path. Otherwise,"
+        " the plot will be served dynamically using Python's HTTP server.",
+    )
+    output.add_argument(
+        "-dl",
+        "--delimiter",
+        type=str,
+        default=",",
+        help="Character to delimit output by [default: human readable]",
+    )
+    output.add_argument(
+        "-dc",
+        "--decimals",
+        help="Number of decimal places in output [default: 2]",
+        type=int,
+        default=2,
+    )
+    output.add_argument(
+        "-hl",
+        "--hide_link_headers",
+        help="Hide alignment column headers",
+        action="store_true",
+    )
+    output.add_argument(
+        "-ha",
+        "--hide_aln_headers",
+        help="Hide alignment cluster name headers",
+        action="store_true",
+    )
+    output.add_argument(
+        "-mo",
+        "--matrix_out",
+        help="Save cluster similarity matrix to file",
+    )
+
+    viz = parser.add_argument_group("Visualisation options")
+    viz.add_argument(
+        "-ufo",
+        "--use_file_order",
+        action="store_true",
+        help="Display clusters in order of input files",
+    )
+
+    trim = parser.add_argument_group("Trimming options")
+    trim.add_argument(
+        "-t",
+        "--trim",
+        help="Trim GenBank records to the aligned region and write to the given directory",
+        type=Path,
+        default=None,
+        metavar="DIR",
+    )
+    trim.add_argument(
+        "-tp",
+        "--trim_padding",
+        help="Padding (bp) to add on either side of the aligned region when trimming [default: 0]",
+        type=int,
+        default=0,
+    )
+    trim.add_argument(
+        "-ts",
+        "--trim_suffix",
+        help="Suffix to append to trimmed output filenames [default: .trimmed.gbk]",
+        default=".trimmed",
+    )
+
+    args = Args(**vars(parser.parse_args()))
+
+    # check inputs
+    if not args.files or not args.file_list:
+        parser.error(
+            "No input files provided. Please pass files as positional args or with --file_list"
+        )
+    if args.files and args.file_list:
+        parser.error(
+            "Please provide only one form of GenBank input: either positional args or --file_list"
+        )
+
+    return args
+
+
+# =============================================================================
+# Input processing util funcs
+# =============================================================================
 def parse_range(string):
     """Extracts the scaffold name, start and end of a scaffold range string.
 
@@ -95,8 +353,12 @@ def parse_colour_map(fp: TextIO) -> Dict[str, str]:
     return colours
 
 
+# ==============================================================================
+# Main functions
+# ==============================================================================
 def clinker(
     files,
+    file_list=None,
     session=None,
     identity=0.3,
     delimiter=None,
@@ -122,6 +384,11 @@ def clinker(
 ):
     """Entry point for running the script."""
     LOG.info("Starting clinker")
+
+    # load files from file list
+    if file_list:
+        with open(file_list) as f:
+            files = [line.strip() for line in f if line.strip()]
 
     load_session = session and Path(session).exists()
 
@@ -203,7 +470,9 @@ def clinker(
         if output:
             if output and Path(output).exists() and not force:
                 print(summary)
-                LOG.warn("File %s already exists but --force was not specified", output)
+                LOG.warning(
+                    "File %s already exists but --force was not specified", output
+                )
             else:
                 LOG.info("Writing alignments to: %s", output)
                 with open(output, "w") as fp:
@@ -255,182 +524,15 @@ def clinker(
     return globaligner
 
 
-def get_parser():
-    """Creates an ArgumentParser object."""
-    parser = argparse.ArgumentParser(
-        "clinker",
-        description="clinker: Automatic creation of publication-ready"
-        " gene cluster comparison figures.\n\n"
-        "clinker generates gene cluster comparison figures from GenBank files."
-        " It performs pairwise local or global alignments between every sequence"
-        " in every unique pair of clusters and generates interactive, to-scale comparison figures"
-        " using the clustermap.js library.",
-        epilog="Example usage\n-------------\n"
-        "Align clusters, plot results and print scores to screen:\n"
-        "  $ clinker files/*.gbk\n\n"
-        "Only save gene-gene links when identity is over 50%:\n"
-        "  $ clinker files/*.gbk -i 0.5\n\n"
-        "Save an alignment session for later:\n"
-        "  $ clinker files/*.gbk -s session.json\n\n"
-        "Save alignments to file, in comma-delimited format, with 4 decimal places:\n"
-        '  $ clinker files/*.gbk -o alignments.csv -dl "," -dc 4\n\n'
-        "Generate visualisation:\n"
-        "  $ clinker files/*.gbk -p\n\n"
-        "Save visualisation as a static HTML document:\n"
-        "  $ clinker files/*.gbk -p plot.html\n\n"
-        "Cameron Gilchrist, 2020",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    parser.add_argument(
-        "--version", action="version", version=f"clinker v{__version__}"
-    )
-
-    inputs = parser.add_argument_group("Input options")
-    inputs.add_argument("files", help="Gene cluster GenBank files", nargs="*")
-    inputs.add_argument(
-        "-r",
-        "--ranges",
-        help="Scaffold extraction ranges. If a range is specified, only features within"
-        " the range will be extracted from the scaffold. Ranges should be formatted"
-        " like: scaffold:start-end (e.g. scaffold_1:15000-40000)",
-        nargs="+",
-    )
-    inputs.add_argument(
-        "-gf",
-        "--gene_functions",
-        help="2-column CSV file containing gene functions, used to build gene groups"
-        " from same function instead of sequence similarity (e.g. GENE_001,PKS-NRPS).",
-        type=argparse.FileType("r"),
-    )
-    inputs.add_argument(
-        "-cm",
-        "--colour_map",
-        help="2-column CSV file containing gene functions and colours (e.g. GENE_001,#FF0000).",
-        type=argparse.FileType("r"),
-    )
-    inputs.add_argument(
-        "-dso",
-        "--dont_set_origin",
-        help="Don't fix features which cross the origin in circular sequences (GenBank format only)",
-        action="store_true",
-    )
-    inputs.add_argument(
-        "-asc",
-        "--as_separate_clusters",
-        help="Records will be parsed into separate clusters. "
-        "Enable this option when the GenBank file you downloaded from NCBI contains multiple sequences.",
-        action="store_true",
-    )
-
-    alignment = parser.add_argument_group("Alignment options")
-    alignment.add_argument(
-        "-na",
-        "--no_align",
-        help="Do not align clusters",
-        action="store_true",
-    )
-    alignment.add_argument(
-        "-i",
-        "--identity",
-        help="Minimum alignment sequence identity [default: 0.3]",
-        type=float,
-        default=0.3,
-    )
-    alignment.add_argument(
-        "-j",
-        "--jobs",
-        help="Number of alignments to run in parallel (0 to use the number of CPUs) [default: 0]",
-        type=int,
-        default=0,
-    )
-
-    output = parser.add_argument_group("Output options")
-    output.add_argument("-s", "--session", help="Path to clinker session")
-    output.add_argument(
-        "-ji",
-        "--json_indent",
-        type=int,
-        help="Number of spaces to indent JSON [default: none]",
-    )
-    output.add_argument(
-        "-f", "--force", help="Overwrite previous output file", action="store_true"
-    )
-    output.add_argument("-o", "--output", help="Save alignments to file")
-    output.add_argument(
-        "-p",
-        "--plot",
-        nargs="?",
-        const=True,
-        default=False,
-        help="Plot cluster alignments using clustermap.js. If a path is given,"
-        " clinker will generate a portable HTML file at that path. Otherwise,"
-        " the plot will be served dynamically using Python's HTTP server.",
-    )
-    output.add_argument(
-        "-dl",
-        "--delimiter",
-        help="Character to delimit output by [default: human readable]",
-    )
-    output.add_argument(
-        "-dc",
-        "--decimals",
-        help="Number of decimal places in output [default: 2]",
-        default=2,
-    )
-    output.add_argument(
-        "-hl",
-        "--hide_link_headers",
-        help="Hide alignment column headers",
-        action="store_true",
-    )
-    output.add_argument(
-        "-ha",
-        "--hide_aln_headers",
-        help="Hide alignment cluster name headers",
-        action="store_true",
-    )
-    output.add_argument(
-        "-mo", "--matrix_out", help="Save cluster similarity matrix to file"
-    )
-
-    viz = parser.add_argument_group("Visualisation options")
-    viz.add_argument(
-        "-ufo",
-        "--use_file_order",
-        action="store_true",
-        help="Display clusters in order of input files",
-    )
-
-    trim = parser.add_argument_group("Trimming options")
-    trim.add_argument(
-        "-t",
-        "--trim",
-        help="Trim GenBank records to the aligned region and write to the given directory",
-        default=None,
-        metavar="DIR",
-    )
-    trim.add_argument(
-        "-tp",
-        "--trim_padding",
-        help="Padding (bp) to add on either side of the aligned region when trimming [default: 0]",
-        type=int,
-        default=0,
-    )
-    trim.add_argument(
-        "-ts",
-        "--trim_suffix",
-        help="Suffix to append to trimmed output filenames [default: .trimmed.gbk]",
-        default=".trimmed",
-    )
-
-    return parser
-
-
+# =============================================================================
 def main():
-    parser = get_parser()
-    args = parser.parse_args()
+    # collect cli args
+    args = get_parser()
+
+    # run clinker
     clinker(
         args.files,
+        file_list=args.file_list,
         session=args.session,
         json_indent=args.json_indent,
         identity=args.identity,
@@ -443,7 +545,7 @@ def main():
         hide_link_headers=args.hide_link_headers,
         hide_alignment_headers=args.hide_aln_headers,
         use_file_order=args.use_file_order,
-        jobs=args.jobs if args.jobs > 0 else None,
+        jobs=args.cpu if args.cpu > 0 else None,
         ranges=args.ranges,
         matrix_out=args.matrix_out,
         gene_functions=args.gene_functions,
@@ -456,5 +558,6 @@ def main():
     )
 
 
+# =============================================================================
 if __name__ == "__main__":
     main()
