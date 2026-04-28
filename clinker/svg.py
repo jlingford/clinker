@@ -27,52 +27,94 @@ LABEL_COLUMN_WIDTH = 600  # px reserved for cluster name on the left
 
 # ==============================================================================
 def find_anchor_gene_per_cluster(
-    anchor_label: str,
+    anchor_map: dict[str, str],
     clusters: list,
-    groups: list,
 ) -> dict:
     """
-    Given an anchor gene label, finds the corresponding gene UID
-    in each cluster via shared group membership.
+    Builds a cluster_uid -> anchor gene_uid mapping from an explicit
+    dict of {cluster_name: anchor_gene_label}.
 
-    Returns dict: cluster_uid -> gene uid of the anchor gene
+    Args:
+        anchor_map: dict mapping cluster name -> anchor gene label
+                    e.g. {"NiFe_Group_4f__GB30501": "GB30501_115"}
+        clusters: list of cluster dicts from globaligner.to_data()
+
+    Returns:
+        dict: cluster_uid -> anchor gene_uid
     """
-    # Build gene uid -> label lookup from cluster data
-    uid_to_label = {}
-    uid_to_cluster = {}
+    cluster_to_anchor = {}
+
     for cluster in clusters:
+        anchor_label = anchor_map.get(cluster["name"])
+        if anchor_label is None:
+            continue  # cluster not in map, will be left as-is
+
         for locus in cluster["loci"]:
             for gene in locus["genes"]:
-                uid_to_label[gene["uid"]] = gene.get("label", "")
-                uid_to_cluster[gene["uid"]] = cluster["uid"]
+                if gene.get("label") == anchor_label:
+                    cluster_to_anchor[cluster["uid"]] = gene["uid"]
+                    break
 
-    # Find the group containing the anchor gene
-    anchor_uid = None
-    for uid, label in uid_to_label.items():
-        if label == anchor_label:
-            anchor_uid = uid
-            break
+    missing = [
+        name for name in anchor_map if not any(c["name"] == name for c in clusters)
+    ]
+    if missing:
+        import logging
 
-    if anchor_uid is None:
-        raise ValueError(f"Anchor gene '{anchor_label}' not found in any cluster")
-
-    anchor_group = None
-    for group in groups:
-        if anchor_uid in group["genes"]:
-            anchor_group = group
-            break
-
-    if anchor_group is None:
-        raise ValueError(f"Anchor gene '{anchor_label}' not found in any group")
-
-    # For each cluster, find which gene in this group belongs to it
-    cluster_to_anchor = {}
-    for gene_uid in anchor_group["genes"]:
-        cluster_uid = uid_to_cluster.get(gene_uid)
-        if cluster_uid:
-            cluster_to_anchor[cluster_uid] = gene_uid
+        logging.getLogger(__name__).warning(
+            "Anchor map contains cluster names not found in data: %s", missing
+        )
 
     return cluster_to_anchor
+
+
+# def find_anchor_gene_per_cluster(
+#     anchor_label: str,
+#     clusters: list,
+#     groups: list,
+# ) -> dict:
+#     """
+#     Given an anchor gene label, finds the corresponding gene UID
+#     in each cluster via shared group membership.
+#
+#     Returns dict: cluster_uid -> gene uid of the anchor gene
+#     """
+#     # Build gene uid -> label lookup from cluster data
+#     uid_to_label = {}
+#     uid_to_cluster = {}
+#     for cluster in clusters:
+#         for locus in cluster["loci"]:
+#             for gene in locus["genes"]:
+#                 uid_to_label[gene["uid"]] = gene.get("label", "")
+#                 uid_to_cluster[gene["uid"]] = cluster["uid"]
+#
+#     # Find the group containing the anchor gene
+#     anchor_uid = None
+#     for uid, label in uid_to_label.items():
+#         if label == anchor_label:
+#             anchor_uid = uid
+#             break
+#
+#     if anchor_uid is None:
+#         raise ValueError(f"Anchor gene '{anchor_label}' not found in any cluster")
+#
+#     anchor_group = None
+#     for group in groups:
+#         if anchor_uid in group["genes"]:
+#             anchor_group = group
+#             break
+#
+#     if anchor_group is None:
+#         raise ValueError(f"Anchor gene '{anchor_label}' not found in any group")
+#
+#     # For each cluster, find which gene in this group belongs to it
+#     cluster_to_anchor = {}
+#     for gene_uid in anchor_group["genes"]:
+#         cluster_uid = uid_to_cluster.get(gene_uid)
+#         if cluster_uid:
+#             cluster_to_anchor[cluster_uid] = gene_uid
+#
+#     return cluster_to_anchor
 
 
 def normalise_locus(
@@ -286,7 +328,8 @@ def render_svg(
     scale: float = SCALE,
     show_gene_labels: bool = False,
     identity_threshold: float = 0.3,
-    anchor_label: str | None = None,
+    # anchor_label: str | None = None,
+    anchor_map: dict[str, str] | None = None,
 ) -> None:
     """
     Renders a clinker Globaligner as a static SVG file.
@@ -321,13 +364,22 @@ def render_svg(
     # -------------------------------------------------------
     # 1b. Anchor normalisation (optional)
     # -------------------------------------------------------
-    if anchor_label:
-        cluster_to_anchor = find_anchor_gene_per_cluster(anchor_label, clusters, groups)
-        # Rewrite loci in each cluster with normalised coordinates
+    # if anchor_label:
+    #     cluster_to_anchor = find_anchor_gene_per_cluster(anchor_label, clusters, groups)
+    #     # Rewrite loci in each cluster with normalised coordinates
+    #     for cluster in clusters:
+    #         anchor_uid = cluster_to_anchor.get(cluster["uid"])
+    #         if anchor_uid is None:
+    #             continue  # no ortholog in this cluster, leave as-is
+    #         cluster["loci"] = [
+    #             normalise_locus(locus, anchor_uid)[0] for locus in cluster["loci"]
+    #         ]
+    if anchor_map:
+        cluster_to_anchor = find_anchor_gene_per_cluster(anchor_map, clusters)
         for cluster in clusters:
             anchor_uid = cluster_to_anchor.get(cluster["uid"])
             if anchor_uid is None:
-                continue  # no ortholog in this cluster, leave as-is
+                continue
             cluster["loci"] = [
                 normalise_locus(locus, anchor_uid)[0] for locus in cluster["loci"]
             ]
@@ -446,12 +498,24 @@ def render_svg(
             locus_start = locus["start"]
             track_x0 = SVG_PADDING + LABEL_COLUMN_WIDTH
 
-            # Backbone starts and ends where the actual locus content is
-            locus_px_start = (
-                track_x0 + (locus["start"] - locus_start) * scale
-            )  # = track_x0
-            locus_px_end = track_x0 + (locus["end"] - locus_start) * scale
+            # # Backbone starts and ends where the actual locus content is
+            # locus_px_start = (
+            #     track_x0 + (locus["start"] - locus_start) * scale
+            # )  # = track_x0
+            # locus_px_end = track_x0 + (locus["end"] - locus_start) * scale
+            # mid_y = track_y + TRACK_HEIGHT / 2
+
             mid_y = track_y + TRACK_HEIGHT / 2
+
+            # Compute backbone extent from actual gene coordinates
+            if locus["genes"]:
+                gene_starts = [g["start"] for g in locus["genes"]]
+                gene_ends = [g["end"] for g in locus["genes"]]
+                locus_px_start = track_x0 + (min(gene_starts) - locus_start) * scale
+                locus_px_end = track_x0 + (max(gene_ends) - locus_start) * scale
+            else:
+                locus_px_start = track_x0 + (locus["start"] - locus_start) * scale
+                locus_px_end = track_x0 + (locus["end"] - locus_start) * scale
 
             elements.append(
                 f'<line x1="{locus_px_start:.1f}" y1="{mid_y:.1f}" '
