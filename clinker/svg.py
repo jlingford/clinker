@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional
 import colorsys
 
+# ==============================================================================
 # Layout constants — all in pixels
 TRACK_HEIGHT = 18  # height of gene arrow body
 ARROW_HEAD = 10  # width of arrowhead
@@ -22,6 +23,118 @@ RIBBON_OPACITY_MAX = 0.8
 SVG_PADDING = 80  # padding around entire figure
 SCALE = 0.05  # bp -> px scaling factor
 LABEL_COLUMN_WIDTH = 600  # px reserved for cluster name on the left
+
+
+# ==============================================================================
+def find_anchor_gene_per_cluster(
+    anchor_label: str,
+    clusters: list,
+    groups: list,
+) -> dict:
+    """
+    Given an anchor gene label, finds the corresponding gene UID
+    in each cluster via shared group membership.
+
+    Returns dict: cluster_uid -> gene uid of the anchor gene
+    """
+    # Build gene uid -> label lookup from cluster data
+    uid_to_label = {}
+    uid_to_cluster = {}
+    for cluster in clusters:
+        for locus in cluster["loci"]:
+            for gene in locus["genes"]:
+                uid_to_label[gene["uid"]] = gene.get("label", "")
+                uid_to_cluster[gene["uid"]] = cluster["uid"]
+
+    # Find the group containing the anchor gene
+    anchor_uid = None
+    for uid, label in uid_to_label.items():
+        if label == anchor_label:
+            anchor_uid = uid
+            break
+
+    if anchor_uid is None:
+        raise ValueError(f"Anchor gene '{anchor_label}' not found in any cluster")
+
+    anchor_group = None
+    for group in groups:
+        if anchor_uid in group["genes"]:
+            anchor_group = group
+            break
+
+    if anchor_group is None:
+        raise ValueError(f"Anchor gene '{anchor_label}' not found in any group")
+
+    # For each cluster, find which gene in this group belongs to it
+    cluster_to_anchor = {}
+    for gene_uid in anchor_group["genes"]:
+        cluster_uid = uid_to_cluster.get(gene_uid)
+        if cluster_uid:
+            cluster_to_anchor[cluster_uid] = gene_uid
+
+    return cluster_to_anchor
+
+
+def normalise_locus(
+    locus: dict,
+    anchor_uid: str,
+) -> tuple[dict, float]:
+    """
+    Flips and translates a locus so the anchor gene is:
+      - always on strand +1 (pointing right)
+      - centred at x=0 in locus coordinate space
+
+    Returns:
+        normalised locus dict (deep copy, original untouched)
+        anchor_centre: the original centre of the anchor gene (for debugging)
+    """
+    import copy
+
+    locus = copy.deepcopy(locus)
+
+    # Find anchor gene in this locus
+    anchor = None
+    for gene in locus["genes"]:
+        if gene["uid"] == anchor_uid:
+            anchor = gene
+            break
+
+    if anchor is None:
+        # Anchor not in this locus, return as-is with no translation
+        return locus, 0.0
+
+    anchor_centre = (anchor["start"] + anchor["end"]) / 2
+    anchor_strand = anchor["strand"]
+
+    # Step 1: flip if anchor is on minus strand
+    if anchor_strand == -1:
+        locus_len = locus["end"] - locus["start"]
+        locus_mid = locus["start"] + locus_len / 2
+
+        for gene in locus["genes"]:
+            # Mirror coordinates around locus midpoint
+            new_start = 2 * locus_mid - gene["end"]
+            new_end = 2 * locus_mid - gene["start"]
+            gene["start"] = new_start
+            gene["end"] = new_end
+            gene["strand"] = -gene["strand"]
+
+        # Recompute anchor centre after flip
+        anchor_centre = (anchor["start"] + anchor["end"]) / 2
+
+    # Step 2: translate so anchor centre is at locus["start"]
+    # (the render loop will then place this at track_x0)
+    offset = anchor_centre - locus["start"]
+    for gene in locus["genes"]:
+        gene["start"] -= offset
+        gene["end"] -= offset
+
+    # Also shift locus bounds
+    locus_span = locus["end"] - locus["start"]
+    locus["start"] = 0
+    locus["end"] = locus_span
+
+    return locus, anchor_centre
 
 
 def identity_to_opacity(identity: float) -> float:
@@ -154,6 +267,18 @@ def ribbon_path(
     )
 
 
+def gene_to_px(
+    gene_start: int,
+    gene_end: int,
+    locus_start: int,
+    track_x0: int,
+    scale: float = SCALE,
+) -> tuple:
+    x1 = track_x0 + (gene_start - locus_start) * scale
+    x2 = track_x0 + (gene_end - locus_start) * scale
+    return x1, x2
+
+
 def render_svg(
     globaligner,
     output: Path,
@@ -161,6 +286,7 @@ def render_svg(
     scale: float = SCALE,
     show_gene_labels: bool = False,
     identity_threshold: float = 0.3,
+    anchor_label: str | None = None,
 ) -> None:
     """
     Renders a clinker Globaligner as a static SVG file.
@@ -173,6 +299,8 @@ def render_svg(
         show_gene_labels: Annotate each gene arrow with its label
         identity_threshold: Minimum identity to draw a ribbon
     """
+    # WARN: test
+    anchor_label = "GB30203_D4993_C5_H3_scaffold_103059_115"
 
     # -------------------------------------------------------
     # 1. Collect plot data via existing Globaligner method
@@ -189,6 +317,64 @@ def render_svg(
     #         uid_to_colour[gene_uid] = group.get("colour") or "#cccccc"
 
     uid_to_colour = build_colour_map(groups)
+
+    # -------------------------------------------------------
+    # 1b. Anchor normalisation (optional)
+    # -------------------------------------------------------
+    if anchor_label:
+        cluster_to_anchor = find_anchor_gene_per_cluster(anchor_label, clusters, groups)
+        # Rewrite loci in each cluster with normalised coordinates
+        for cluster in clusters:
+            anchor_uid = cluster_to_anchor.get(cluster["uid"])
+            if anchor_uid is None:
+                continue  # no ortholog in this cluster, leave as-is
+            cluster["loci"] = [
+                normalise_locus(locus, anchor_uid)[0] for locus in cluster["loci"]
+            ]
+        # Recompute max_locus_span after normalisation
+        max_locus_span = 0
+        for cluster in clusters:
+            for locus in cluster["loci"]:
+                span = locus["end"] - locus["start"]
+                max_locus_span = max(max_locus_span, span)
+        svg_width = (
+            SVG_PADDING + LABEL_COLUMN_WIDTH + max_locus_span * scale + SVG_PADDING
+        )
+        # Find leftmost gene coordinate across all clusters
+        min_gene_start = 0.0
+        for cluster in clusters:
+            for locus in cluster["loci"]:
+                for gene in locus["genes"]:
+                    min_gene_start = min(min_gene_start, gene["start"])
+
+        # # Shift all genes right so nothing is clipped
+        # if min_gene_start < 0:
+        #     shift = -min_gene_start
+        #     for cluster in clusters:
+        #         for locus in cluster["loci"]:
+        #             for gene in locus["genes"]:
+        #                 gene["start"] += shift
+        #                 gene["end"] += shift
+        #             locus["start"] += shift
+        #             locus["end"] += shift
+
+        # After the global shift block in section 1b, add:
+        if min_gene_start < 0:
+            shift = -min_gene_start
+            for cluster in clusters:
+                for locus in cluster["loci"]:
+                    for gene in locus["genes"]:
+                        gene["start"] += shift
+                        gene["end"] += shift
+                    locus["start"] += shift
+                    locus["end"] += shift
+
+        # Force locus start to 0 so gene_to_px origin is always track_x0
+        for cluster in clusters:
+            for locus in cluster["loci"]:
+                locus_span = locus["end"] - locus["start"]
+                locus["start"] = 0
+                locus["end"] = locus_span
 
     # -------------------------------------------------------
     # 2. Compute layout geometry
@@ -241,15 +427,32 @@ def render_svg(
         # Track starts after the label column
         # track_x0 = SVG_PADDING + LABEL_COLUMN_WIDTH
 
+        # for locus in cluster["loci"]:
+        #     locus_start = locus["start"]
+        #     # track_x0 = SVG_PADDING + 80  # leave room for cluster name label
+        #     track_x0 = SVG_PADDING + LABEL_COLUMN_WIDTH
+        #
+        #     # Draw backbone line for locus
+        #     locus_px_start = track_x0
+        #     locus_px_end = track_x0 + (locus["end"] - locus_start) * scale
+        #     mid_y = track_y + TRACK_HEIGHT / 2
+        #     elements.append(
+        #         f'<line x1="{locus_px_start:.1f}" y1="{mid_y:.1f}" '
+        #         f'x2="{locus_px_end:.1f}" y2="{mid_y:.1f}" '
+        #         f'stroke="#aaaaaa" stroke-width="1.5"/>'
+        #     )
+        #
         for locus in cluster["loci"]:
             locus_start = locus["start"]
-            # track_x0 = SVG_PADDING + 80  # leave room for cluster name label
             track_x0 = SVG_PADDING + LABEL_COLUMN_WIDTH
 
-            # Draw backbone line for locus
-            locus_px_start = track_x0
+            # Backbone starts and ends where the actual locus content is
+            locus_px_start = (
+                track_x0 + (locus["start"] - locus_start) * scale
+            )  # = track_x0
             locus_px_end = track_x0 + (locus["end"] - locus_start) * scale
             mid_y = track_y + TRACK_HEIGHT / 2
+
             elements.append(
                 f'<line x1="{locus_px_start:.1f}" y1="{mid_y:.1f}" '
                 f'x2="{locus_px_end:.1f}" y2="{mid_y:.1f}" '
@@ -257,7 +460,9 @@ def render_svg(
             )
 
             for gene in locus["genes"]:
-                x1, x2 = gene_to_px(gene["start"], gene["end"], locus_start, track_x0)
+                x1, x2 = gene_to_px(
+                    gene["start"], gene["end"], locus_start, track_x0, scale
+                )
                 colour = uid_to_colour.get(gene["uid"], "#dddddd")
                 strand = gene.get("strand", 1)
 
