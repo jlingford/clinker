@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 """
 Warning: all vibe coded... mileage may vary
 """
@@ -9,13 +11,17 @@ import colorsys
 # Layout constants — all in pixels
 TRACK_HEIGHT = 18  # height of gene arrow body
 ARROW_HEAD = 10  # width of arrowhead
+ARROW_STROKE_COLOUR = "black"
+ARROW_STROKE_WIDTH = 0.8
+ARROW_BODY_OPACITY = 1.0
 TRACK_SPACING = 120  # vertical distance between cluster tracks
 LABEL_OFFSET = 14  # px above track for gene labels
 CLUSTER_LABEL_X = 10  # x position of cluster name label
 RIBBON_OPACITY_MIN = 0.1
 RIBBON_OPACITY_MAX = 0.8
-SVG_PADDING = 40  # padding around entire figure
+SVG_PADDING = 80  # padding around entire figure
 SCALE = 0.05  # bp -> px scaling factor
+LABEL_COLUMN_WIDTH = 600  # px reserved for cluster name on the left
 
 
 def identity_to_opacity(identity: float) -> float:
@@ -23,16 +29,50 @@ def identity_to_opacity(identity: float) -> float:
     return RIBBON_OPACITY_MIN + identity * (RIBBON_OPACITY_MAX - RIBBON_OPACITY_MIN)
 
 
-def gene_colour(gene_uid: str, groups: list) -> str:
-    """Looks up colour for a gene UID from the group list."""
+# def gene_colour(gene_uid: str, groups: list) -> str:
+#     """Looks up colour for a gene UID from the group list."""
+#     for group in groups:
+#         if gene_uid in group["genes"]:
+#             return group["colour"] or "#cccccc"
+#     return "#dddddd"  # ungrouped genes
+
+
+def generate_colours(n: int) -> list[str]:
+    """Generates n visually distinct colours using HSL spacing."""
+    colours = []
+    for i in range(n):
+        hue = i / n
+        # Use fixed saturation/lightness similar to clustermap.js defaults
+        r, g, b = colorsys.hls_to_rgb(hue, 0.6, 0.7)
+        colours.append(
+            "#{:02x}{:02x}{:02x}".format(int(r * 255), int(g * 255), int(b * 255))
+        )
+    return colours
+
+
+def build_colour_map(groups: list) -> dict:
+    """
+    Builds a gene_uid -> colour dict from groups.
+    Auto-generates colours for groups where colour is None.
+    """
+    # Count how many groups need auto-colour
+    auto_groups = [g for g in groups if not g.get("colour")]
+    auto_colours = generate_colours(len(auto_groups))
+    auto_iter = iter(auto_colours)
+
+    uid_to_colour = {}
     for group in groups:
-        if gene_uid in group["genes"]:
-            return group["colour"] or "#cccccc"
-    return "#dddddd"  # ungrouped genes
+        colour = group.get("colour") or next(auto_iter)
+        for gene_uid in group["genes"]:
+            uid_to_colour[gene_uid] = colour
+    return uid_to_colour
 
 
 def gene_to_px(
-    gene_start: int, gene_end: int, locus_start: int, track_x0: int
+    gene_start: int,
+    gene_end: int,
+    locus_start: int,
+    track_x0: int,
 ) -> tuple:
     """Converts gene genomic coordinates to pixel x positions."""
     x1 = track_x0 + (gene_start - locus_start) * SCALE
@@ -142,11 +182,13 @@ def render_svg(
     links = data["links"]  # list of link dicts
     groups = data["groups"]  # list of group dicts (colour assignments)
 
-    # Build gene_uid -> group colour lookup for fast access
-    uid_to_colour = {}
-    for group in groups:
-        for gene_uid in group["genes"]:
-            uid_to_colour[gene_uid] = group.get("colour") or "#cccccc"
+    # # Build gene_uid -> group colour lookup for fast access
+    # uid_to_colour = {}
+    # for group in groups:
+    #     for gene_uid in group["genes"]:
+    #         uid_to_colour[gene_uid] = group.get("colour") or "#cccccc"
+
+    uid_to_colour = build_colour_map(groups)
 
     # -------------------------------------------------------
     # 2. Compute layout geometry
@@ -160,7 +202,10 @@ def render_svg(
             span = locus["end"] - locus["start"]
             max_locus_span = max(max_locus_span, span)
 
-    svg_width = SVG_PADDING * 2 + max_locus_span * scale
+    # svg_width = SVG_PADDING * 2 + max_locus_span * scale
+    svg_width = (
+        SVG_PADDING * 2 + LABEL_COLUMN_WIDTH + max_locus_span * scale + SVG_PADDING
+    )
     svg_height = SVG_PADDING * 2 + n_clusters * TRACK_SPACING
 
     elements = []  # accumulate SVG element strings
@@ -179,15 +224,27 @@ def render_svg(
         track_y_top[cluster["uid"]] = track_y
 
         # Cluster name label
+        # elements.append(
+        #     f'<text x="{CLUSTER_LABEL_X}" y="{track_y + TRACK_HEIGHT / 2 + 4:.1f}" '
+        #     f'font-family="sans-serif" font-size="12" '
+        #     f'dominant-baseline="middle">{cluster["name"]}</text>'
+        # )
+
+        # Cluster name label — right-aligned into the label column
         elements.append(
-            f'<text x="{CLUSTER_LABEL_X}" y="{track_y + TRACK_HEIGHT / 2 + 4:.1f}" '
-            f'font-family="sans-serif" font-size="12" '
+            f'<text x="{SVG_PADDING + LABEL_COLUMN_WIDTH - 8}" y="{track_y + TRACK_HEIGHT / 2 + 4:.1f}" '
+            f'font-family="sans-serif" font-size="11" '
+            f'text-anchor="end" '
             f'dominant-baseline="middle">{cluster["name"]}</text>'
         )
 
+        # Track starts after the label column
+        # track_x0 = SVG_PADDING + LABEL_COLUMN_WIDTH
+
         for locus in cluster["loci"]:
             locus_start = locus["start"]
-            track_x0 = SVG_PADDING + 80  # leave room for cluster name label
+            # track_x0 = SVG_PADDING + 80  # leave room for cluster name label
+            track_x0 = SVG_PADDING + LABEL_COLUMN_WIDTH
 
             # Draw backbone line for locus
             locus_px_start = track_x0
@@ -208,10 +265,11 @@ def render_svg(
                 if not pts:
                     continue
 
+                # NOTE: this controls the look of gene arrows
                 elements.append(
                     f'<polygon points="{pts}" '
-                    f'fill="{colour}" stroke="white" stroke-width="0.8" '
-                    f'opacity="0.9"/>'
+                    f'fill="{colour}" stroke="{ARROW_STROKE_COLOUR}" stroke-width="{ARROW_STROKE_WIDTH}" '
+                    f'opacity="{ARROW_BODY_OPACITY}"/>'
                 )
 
                 # Store geometry for ribbon drawing
