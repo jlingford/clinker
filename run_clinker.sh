@@ -8,8 +8,10 @@
 
 # INPUTDIR="./input/nife_select1/group4s/overlapping_group4"
 # OUTNAME="overlapping_group4_test3"
-INPUTDIR="./input/nife_select1/group3s/overlapping_group3"
-OUTNAME="overlapping_group3_redo"
+# INPUTDIR="./input/nife_select1/group3s/overlapping_group3"
+# OUTNAME="overlapping_group3_redo"
+INPUTDIR="/home/james/Dropbox/Monash/HydDB/famous_hydrogenases/Group2a_NiFes/clinker_trimming/group2a_rand200/group2a_sliced_rand200_round1/trimmed_gbks/cluster4"
+OUTNAME="group2a_cluster4"
 
 # set output names and dirs
 name=${INPUTDIR##*/}
