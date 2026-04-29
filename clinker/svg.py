@@ -23,6 +23,12 @@ RIBBON_OPACITY_MAX = 0.8
 SVG_PADDING = 80  # padding around entire figure
 SCALE = 0.05  # bp -> px scaling factor
 LABEL_COLUMN_WIDTH = 600  # px reserved for cluster name on the left
+# legend constants
+LEGEND_BOTTOM_MARGIN = 60  # extra height below last track for legend
+SCALEBAR_BP = 2500  # genomic length the scale bar represents
+SCALEBAR_HEIGHT = 8  # tick height in px
+IDENTITY_BAR_WIDTH = 160
+IDENTITY_BAR_HEIGHT = 14
 
 
 # ==============================================================================
@@ -332,6 +338,88 @@ def ribbon_path(
     )
 
 
+def build_legend(svg_width: float, svg_height: float, scale: float) -> list[str]:
+    """Renders scale bar and identity gradient legend."""
+    elements = []
+
+    legend_x = SVG_PADDING + LABEL_COLUMN_WIDTH
+    legend_y = svg_height - LEGEND_BOTTOM_MARGIN + 10
+
+    # ------------------------------------------------------------------
+    # Scale bar
+    # ------------------------------------------------------------------
+    bar_px = SCALEBAR_BP * scale
+    tick_y_top = legend_y
+    tick_y_bot = legend_y + SCALEBAR_HEIGHT
+    mid_y = legend_y + SCALEBAR_HEIGHT / 2
+
+    # Horizontal line + two end ticks
+    elements.append(
+        f'<line x1="{legend_x:.1f}" y1="{mid_y:.1f}" '
+        f'x2="{legend_x + bar_px:.1f}" y2="{mid_y:.1f}" '
+        f'stroke="black" stroke-width="1.5"/>'
+    )
+    for tx in (legend_x, legend_x + bar_px):
+        elements.append(
+            f'<line x1="{tx:.1f}" y1="{tick_y_top:.1f}" '
+            f'x2="{tx:.1f}" y2="{tick_y_bot:.1f}" '
+            f'stroke="black" stroke-width="1.5"/>'
+        )
+
+    # Label — format as kb if >= 1000 bp
+    if SCALEBAR_BP >= 1000:
+        label = f"{SCALEBAR_BP / 1000:g} kb"
+    else:
+        label = f"{SCALEBAR_BP} bp"
+
+    label_x = legend_x + bar_px / 2
+    label_y = tick_y_bot + 13
+    elements.append(
+        f'<text x="{label_x:.1f}" y="{label_y:.1f}" '
+        f'font-family="sans-serif" font-size="11" '
+        f'text-anchor="middle">{label}</text>'
+    )
+
+    # ------------------------------------------------------------------
+    # Identity gradient bar
+    # ------------------------------------------------------------------
+    grad_x = legend_x + bar_px + 40
+    grad_y = legend_y
+    grad_id = "identityGrad"
+
+    elements.append(
+        f"<defs>"
+        f'<linearGradient id="{grad_id}" x1="0" y1="0" x2="1" y2="0">'
+        f'<stop offset="0%"   stop-color="white"  stop-opacity="1"/>'
+        f'<stop offset="100%" stop-color="black"  stop-opacity="1"/>'
+        f"</linearGradient>"
+        f"</defs>"
+    )
+    elements.append(
+        f'<rect x="{grad_x:.1f}" y="{grad_y:.1f}" '
+        f'width="{IDENTITY_BAR_WIDTH}" height="{IDENTITY_BAR_HEIGHT}" '
+        f'fill="url(#{grad_id})" stroke="black" stroke-width="0.8"/>'
+    )
+
+    # Labels: 0, Identity (%), 100
+    text_y = grad_y + IDENTITY_BAR_HEIGHT + 13
+    elements.append(
+        f'<text x="{grad_x:.1f}" y="{text_y:.1f}" '
+        f'font-family="sans-serif" font-size="11" text-anchor="start">0</text>'
+    )
+    elements.append(
+        f'<text x="{grad_x + IDENTITY_BAR_WIDTH / 2:.1f}" y="{text_y:.1f}" '
+        f'font-family="sans-serif" font-size="11" text-anchor="middle">Identity (%)</text>'
+    )
+    elements.append(
+        f'<text x="{grad_x + IDENTITY_BAR_WIDTH:.1f}" y="{text_y:.1f}" '
+        f'font-family="sans-serif" font-size="11" text-anchor="end">100</text>'
+    )
+
+    return elements
+
+
+# ==============================================================================
 def render_svg(
     globaligner,
     output: Path,
@@ -455,7 +543,8 @@ def render_svg(
     svg_width = (
         SVG_PADDING * 2 + LABEL_COLUMN_WIDTH + max_locus_span * scale + SVG_PADDING
     )
-    svg_height = SVG_PADDING * 2 + n_clusters * TRACK_SPACING
+    # svg_height = SVG_PADDING * 2 + n_clusters * TRACK_SPACING
+    svg_height = SVG_PADDING * 2 + n_clusters * TRACK_SPACING + LEGEND_BOTTOM_MARGIN
 
     elements = []  # accumulate SVG element strings
 
@@ -638,6 +727,9 @@ def render_svg(
             f'<path d="{path}" fill="{colour}" opacity="{opacity:.2f}" stroke="none"/>'
         )
 
+    # legend
+    legend_elements = build_legend(svg_width, svg_height, scale)
+
     # -------------------------------------------------------
     # 5. Assemble final SVG
     # -------------------------------------------------------
@@ -650,6 +742,8 @@ def render_svg(
         *ribbon_elements,
         "<!-- gene arrows -->",
         *elements,
+        "<!-- legend -->",
+        *legend_elements,
         "</svg>",
     ]
 
