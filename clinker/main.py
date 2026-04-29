@@ -6,6 +6,14 @@ Command line interface
 Original: Cameron Gilchrist
 Forked: James Lingford
 """
+# TODO:
+# - [ ] save globaligner object as pickle file
+# - [ ] add arg to read in globaligner aligner object
+# - [ ] add scale bar and colour bar to svg
+# - [ ] change connections b/w gene arrows to shade of grey
+# - [ ] get annotations from genbank file and add them as color labels to svg
+# - [ ] add better colours to svg gene arrows
+# - [ ] clean up args and control flow
 
 import argparse
 import logging
