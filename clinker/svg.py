@@ -22,7 +22,7 @@ RIBBON_OPACITY_MIN = 0.1
 RIBBON_OPACITY_MAX = 0.8
 SVG_PADDING = 80  # padding around entire figure
 SCALE = 0.05  # bp -> px scaling factor
-LABEL_COLUMN_WIDTH = 600  # px reserved for cluster name on the left
+LABEL_COLUMN_WIDTH = 800  # px reserved for cluster name on the left
 # legend constants
 LEGEND_BOTTOM_MARGIN = 60  # extra height below last track for legend
 SCALEBAR_BP = 2500  # genomic length the scale bar represents
