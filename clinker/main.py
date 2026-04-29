@@ -391,7 +391,8 @@ def parse_target_anchor_genes(file_list: list[str]) -> dict[str, str]:
     for file in file_list:
         file = Path(file)
         cluster = file.stem
-        gene_target = file.name.removesuffix("".join(file.suffixes)).split("___")[-1]
+        # gene_target = file.name.removesuffix("".join(file.suffixes)).split("___")[-1]
+        gene_target = file.name.removesuffix("".join(file.suffixes))
         anchor_map.update({cluster: gene_target})
     return anchor_map
 
