@@ -13,9 +13,9 @@ import colorsys
 TRACK_HEIGHT = 18  # height of gene arrow body
 ARROW_HEAD = 10  # width of arrowhead
 ARROW_STROKE_COLOUR = "black"
-ARROW_STROKE_WIDTH = 0.8
+ARROW_STROKE_WIDTH = 1.0
 ARROW_BODY_OPACITY = 1.0
-TRACK_SPACING = 120  # vertical distance between cluster tracks
+TRACK_SPACING = 80  # vertical distance between cluster tracks
 LABEL_OFFSET = 14  # px above track for gene labels
 CLUSTER_LABEL_X = 10  # x position of cluster name label
 RIBBON_OPACITY_MIN = 0.1
@@ -235,6 +235,18 @@ def gene_to_px(
     return x1, x2
 
 
+# def gene_to_px(
+#     gene_start: int,
+#     gene_end: int,
+#     locus_start: int,
+#     track_x0: int,
+#     scale: float = SCALE,
+# ) -> tuple:
+#     x1 = track_x0 + (gene_start - locus_start) * scale
+#     x2 = track_x0 + (gene_end - locus_start) * scale
+#     return x1, x2
+
+
 def arrow_polygon(
     x1: float,
     x2: float,
@@ -282,7 +294,12 @@ def arrow_polygon(
 
 
 def ribbon_path(
-    x1: float, y1: float, x2: float, y2: float, w1: float, w2: float
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+    w1: float,
+    w2: float,
 ) -> str:
     """
     Generates an SVG cubic bezier ribbon path between two gene arrows.
@@ -300,6 +317,12 @@ def ribbon_path(
     bl = (x2 - w2, y2)
     br = (x2 + w2, y2)
 
+    # # Four corners of the ribbon
+    # tl = (x1, y1)
+    # tr = (x1, y1)
+    # bl = (x2, y2)
+    # br = (x2, y2)
+
     return (
         f"M {tl[0]:.1f},{tl[1]:.1f} "
         f"C {tl[0]:.1f},{cy:.1f} {bl[0]:.1f},{cy:.1f} {bl[0]:.1f},{bl[1]:.1f} "
@@ -307,18 +330,6 @@ def ribbon_path(
         f"C {br[0]:.1f},{cy:.1f} {tr[0]:.1f},{cy:.1f} {tr[0]:.1f},{tr[1]:.1f} "
         f"Z"
     )
-
-
-def gene_to_px(
-    gene_start: int,
-    gene_end: int,
-    locus_start: int,
-    track_x0: int,
-    scale: float = SCALE,
-) -> tuple:
-    x1 = track_x0 + (gene_start - locus_start) * scale
-    x2 = track_x0 + (gene_end - locus_start) * scale
-    return x1, x2
 
 
 def render_svg(
@@ -471,7 +482,7 @@ def render_svg(
         # Cluster name label — right-aligned into the label column
         elements.append(
             f'<text x="{SVG_PADDING + LABEL_COLUMN_WIDTH - 8}" y="{track_y + TRACK_HEIGHT / 2 + 4:.1f}" '
-            f'font-family="sans-serif" font-size="11" '
+            f'font-family="sans-serif" font-size="14" '
             f'text-anchor="end" '
             f'dominant-baseline="middle">{cluster["name"]}</text>'
         )
@@ -525,7 +536,10 @@ def render_svg(
 
             for gene in locus["genes"]:
                 x1, x2 = gene_to_px(
-                    gene["start"], gene["end"], locus_start, track_x0, scale
+                    gene_start=gene["start"],
+                    gene_end=gene["end"],
+                    locus_start=locus_start,
+                    track_x0=track_x0,
                 )
                 colour = uid_to_colour.get(gene["uid"], "#dddddd")
                 strand = gene.get("strand", 1)
@@ -544,14 +558,15 @@ def render_svg(
                 # Store geometry for ribbon drawing
                 cx = (x1 + x2) / 2
                 half_w = (x2 - x1) / 2
-                gene_geom[gene["uid"]] = (cx, track_y + TRACK_HEIGHT, half_w)
+                # gene_geom[gene["uid"]] = (cx, track_y + TRACK_HEIGHT, half_w)
+                gene_geom[gene["uid"]] = (cx, track_y + TRACK_HEIGHT / 2, half_w)
 
                 if show_gene_labels and gene.get("label"):
                     lx = (x1 + x2) / 2
                     ly = track_y - 3
                     elements.append(
                         f'<text x="{lx:.1f}" y="{ly:.1f}" '
-                        f'font-family="sans-serif" font-size="8" '
+                        f'font-family="sans-serif" font-size="12" '
                         f'text-anchor="middle">{gene["label"]}</text>'
                     )
 
@@ -603,13 +618,21 @@ def render_svg(
 
         qx, qy, qw = gene_geom[q_uid]  # bottom of upper gene
         tx, ty, tw = gene_geom[t_uid]  # top of lower gene
-        ty_top = ty - TRACK_HEIGHT  # we want top of lower arrow, not bottom
+        # ty_top = ty - TRACK_HEIGHT  # we want top of lower arrow, not bottom
 
-        path = ribbon_path(qx, qy, tx, ty_top, qw, tw)
+        path = ribbon_path(
+            x1=qx,
+            y1=qy,
+            x2=tx,
+            y2=ty,
+            w1=qw,
+            w2=tw,
+        )
         opacity = identity_to_opacity(identity)
 
         # Ribbon colour from query gene group
-        colour = uid_to_colour.get(q_uid, "#aaaaaa")
+        # colour = uid_to_colour.get(q_uid, "#aaaaaa")
+        colour = "#a6adc8"
 
         ribbon_elements.append(
             f'<path d="{path}" fill="{colour}" opacity="{opacity:.2f}" stroke="none"/>'
