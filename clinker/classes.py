@@ -22,7 +22,7 @@ from Bio import SeqIO, SeqRecord, BiopythonParserWarning
 from Bio.SeqFeature import SeqFeature, FeatureLocation, CompoundLocation
 
 # ignore malformed locus warnings
-warnings.simplefilter('ignore', BiopythonParserWarning)
+warnings.simplefilter("ignore", BiopythonParserWarning)
 
 LOG = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ def merge_locations(parts):
             c = FeatureLocation(a.start, b.end, a.strand, a.ref, a.ref_db)
             new_parts.append(c)
         else:
-            new_parts.extend(new_parts[i: i + 1])
+            new_parts.extend(new_parts[i : i + 1])
     return new_parts
 
 
@@ -53,7 +53,7 @@ def shift_origin(record: SeqRecord) -> SeqRecord:
     # Collect features going across the current origin
     spanning_origin = []
     for feature in record.features:
-        if feature.type.lower() not in ('gene', 'cds'):
+        if feature.type.lower() not in ("gene", "cds"):
             continue
         if feature.location.parts[0].start < feature.location.parts[-1].end:
             continue
@@ -67,7 +67,9 @@ def shift_origin(record: SeqRecord) -> SeqRecord:
     shift = spanning_origin[0].location.parts[0].start
 
     LOG.info(f"Found {len(spanning_origin)} features wrapping origin")
-    LOG.info(f"Setting new origin to {shift} (start of {spanning_origin[0].qualifiers.get('locus_tag')[0]})")
+    LOG.info(
+        f"Setting new origin to {shift} (start of {spanning_origin[0].qualifiers.get('locus_tag')[0]})"
+    )
 
     # BioPython-recommended way of shifting origin, but deletes SeqFeatures which span the origin
     record = record[shift:] + record[:shift]
@@ -86,20 +88,26 @@ def shift_origin(record: SeqRecord) -> SeqRecord:
             new_end = part.end % length
 
             if new_start < new_end:
-                fl = FeatureLocation(new_start, new_end, part.strand, part.ref, part.ref_db)
+                fl = FeatureLocation(
+                    new_start, new_end, part.strand, part.ref, part.ref_db
+                )
                 new_parts.append(fl)
 
             # Fix other features if they now wrap the origin
             elif new_start > new_end:
                 if part.strand == 1:
                     fls = [
-                        FeatureLocation(new_start, length, part.strand, part.ref, part.ref_db),
+                        FeatureLocation(
+                            new_start, length, part.strand, part.ref, part.ref_db
+                        ),
                         FeatureLocation(0, new_end, part.strand, part.ref, part.ref_db),
                     ]
                 else:
                     fls = [
                         FeatureLocation(0, new_end, part.strand, part.ref, part.ref_db),
-                        FeatureLocation(new_start, length, part.strand, part.ref, part.ref_db),
+                        FeatureLocation(
+                            new_start, length, part.strand, part.ref, part.ref_db
+                        ),
                     ]
                 new_parts.extend(fls)
 
@@ -156,7 +164,7 @@ def cluster_from_gff(path, ranges=None):
         ":memory:",
         force=True,
         merge_strategy="create_unique",
-        sort_attribute_values=True
+        sort_attribute_values=True,
     )
     regions = find_regions(gff.directives)
 
@@ -178,7 +186,7 @@ def cluster_from_gff(path, ranges=None):
             # -- Default: 0 to end of record
             # -- ##sequence-region: start to end of directive
             # -- User-specified range: start to end of range
-            record = record[record_start - 1: record_end]
+            record = record[record_start - 1 : record_end]
 
         # Zero-index the start of the record
         record_start -= 1
@@ -213,7 +221,7 @@ def cluster_from_gff(path, ranges=None):
             feature.location = FeatureLocation(
                 feature.location.start - record_start,
                 feature.location.end - record_start,
-                strand=feature.location.strand
+                strand=feature.location.strand,
             )
 
             # Either merge with previous feature, or append it
@@ -299,7 +307,9 @@ def cluster_from_genbank(path, ranges=None, set_origin=True):
         for record in SeqIO.parse(fp, "genbank"):
             if ranges and record.id in ranges:
                 start, end = ranges[record.id]
-                locus = Locus.from_seqrecord(record, start=start - 1, end=end, set_origin=set_origin)
+                locus = Locus.from_seqrecord(
+                    record, start=start - 1, end=end, set_origin=set_origin
+                )
             else:
                 locus = Locus.from_seqrecord(record, set_origin=set_origin)
             loci.append(locus)
@@ -369,12 +379,7 @@ def parse_files(paths, ranges=None, set_origin=True, as_separate_clusters=False)
 
 
 def get_children(children, uids_only=False):
-    return [
-        child.uid
-        if uids_only
-        else child.to_dict()
-        for child in children
-    ]
+    return [child.uid if uids_only else child.to_dict() for child in children]
 
 
 def load_child(child, thing):
@@ -448,16 +453,12 @@ class Cluster(Serializer):
         return {
             "uid": self.uid,
             "name": self.name,
-            "loci": get_children(self.loci, uids_only=uids_only)
+            "loci": get_children(self.loci, uids_only=uids_only),
         }
 
     @classmethod
     def from_dict(cls, d):
-        return cls(
-            d["name"],
-            load_children(d["loci"], Locus),
-            uid=d.get("uid")
-        )
+        return cls(d["name"], load_children(d["loci"], Locus), uid=d.get("uid"))
 
     @classmethod
     def from_seqrecords(cls, *args, name=None):
@@ -522,15 +523,17 @@ class Locus(Serializer):
         if not isinstance(record, SeqRecord.SeqRecord):
             raise TypeError("Expected SeqRecord object")
 
-        if set_origin and record.annotations.get('topology') == 'circular':
-            LOG.warning(f"{record.id} is circular, checking for genes spanning the origin")
+        if set_origin and record.annotations.get("topology") == "circular":
+            LOG.warning(
+                f"{record.id} is circular, checking for genes spanning the origin"
+            )
             LOG.warning("To disable this behaviour, use --dont_set_origin")
             record = shift_origin(record)
 
         ranged = start or end
         start = start if start else 0
         end = end if end else len(record)
-        
+
         # Manually filter SeqRecord if start or end is specified.
         # Can directly slice SeqRecord objects, but will automatically adjust
         # feature locations - we want them as is, since they'll be normalised
@@ -542,7 +545,7 @@ class Locus(Serializer):
                 for feature in record.features
                 if feature.location.start >= start and feature.location.end <= end
             ]
-            record.seq = record.seq[start - 1: end]
+            record.seq = record.seq[start - 1 : end]
 
         # Find all CDS SeqFeature and gene FeatureLocations
         features = [f for f in record.features if f.type == "CDS"]
@@ -593,6 +596,7 @@ class Gene(Serializer):
         strand=None,
         sequence=None,
         translation=None,
+        kofam_id=None,  # new
     ):
         self.uid = uid if uid else str(uuid.uuid4())
         self.label = label if label else self.uid
@@ -602,6 +606,7 @@ class Gene(Serializer):
         self.strand = strand
         self.sequence = sequence
         self.translation = translation
+        self.kofam_id = kofam_id  # new
 
     def to_dict(self):
         return {
@@ -613,6 +618,7 @@ class Gene(Serializer):
             "strand": self.strand,
             "sequence": self.sequence,
             "translation": self.translation,
+            "kofam_id": self.kofam_id,  # new
         }
 
     @classmethod
@@ -641,11 +647,17 @@ class Gene(Serializer):
         """
         tags = ("protein_id", "locus_tag", "id", "ID", "gene", "label", "name")
         qualifiers = {
-            k: v[0] if isinstance(v, list) else v
-            for k, v in feature.qualifiers.items()
+            k: v[0] if isinstance(v, list) else v for k, v in feature.qualifiers.items()
         }
+        kofam_id = feature.qualifiers.get("kofam_id", [None])[0]  # new
+        kofam_desc = feature.qualifiers.get("kofam_description", [None])[0]  # new
+        kofam_desc = kofam_desc[0:50]
+        if not kofam_id == "None":
+            kofam_id = f"{kofam_id}; {kofam_desc}"
         sequence = feature.extract(record.seq)
-        translation = qualifiers.pop("translation", sequence.translate() if sequence.defined else "")
+        translation = qualifiers.pop(
+            "translation", sequence.translate() if sequence.defined else ""
+        )
         return cls(
             names=qualifiers,
             label=get_value(qualifiers, tags),
@@ -654,4 +666,5 @@ class Gene(Serializer):
             start=start if start else int(feature.location.start),
             end=end if end else int(feature.location.end),
             strand=feature.location.strand,
+            kofam_id=kofam_id,  # new
         )
