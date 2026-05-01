@@ -19,11 +19,12 @@ ARROW_BODY_OPACITY = 1.0
 TRACK_SPACING = 80  # vertical distance between cluster tracks
 LABEL_OFFSET = 14  # px above track for gene labels
 CLUSTER_LABEL_X = 10  # x position of cluster name label
-RIBBON_OPACITY_MIN = 0.1
-RIBBON_OPACITY_MAX = 0.8
+RIBBON_OPACITY_MIN = 0.0
+RIBBON_OPACITY_MAX = 1.0
+RIBBON_COLOR = "#a6adc8"
 SVG_PADDING = 20  # padding around entire figure
 SCALE = 0.05  # bp -> px scaling factor
-LABEL_COLUMN_WIDTH = 800  # px reserved for cluster name on the left
+LABEL_COLUMN_WIDTH = 480  # px reserved for cluster name on the left
 # legend constants
 LEGEND_BOTTOM_MARGIN = 80  # extra height below last track for legend
 SCALEBAR_BP = 2500  # genomic length the scale bar represents
@@ -230,6 +231,7 @@ def find_anchor_gene_per_cluster(
 #     return cluster_to_anchor
 
 
+# ==============================================================================
 def normalise_locus(
     locus: dict,
     anchor_uid: str,
@@ -292,6 +294,7 @@ def normalise_locus(
     return locus, anchor_centre
 
 
+# ==============================================================================
 def identity_to_opacity(identity: float) -> float:
     """Maps alignment identity to ribbon opacity."""
     return RIBBON_OPACITY_MIN + identity * (RIBBON_OPACITY_MAX - RIBBON_OPACITY_MIN)
@@ -305,6 +308,7 @@ def identity_to_opacity(identity: float) -> float:
 #     return "#dddddd"  # ungrouped genes
 
 
+# ==============================================================================
 def generate_colours(n: int) -> list[str]:
     """Generates n visually distinct colours using HSL spacing."""
     colours = []
@@ -318,6 +322,7 @@ def generate_colours(n: int) -> list[str]:
     return colours
 
 
+# ==============================================================================
 def build_colour_map(groups: list) -> dict:
     """
     Builds a gene_uid -> colour dict from groups.
@@ -336,6 +341,7 @@ def build_colour_map(groups: list) -> dict:
     return uid_to_colour
 
 
+# ==============================================================================
 def gene_to_px(
     gene_start: int,
     gene_end: int,
@@ -360,6 +366,7 @@ def gene_to_px(
 #     return x1, x2
 
 
+# ==============================================================================
 def arrow_polygon(
     x1: float,
     x2: float,
@@ -406,6 +413,7 @@ def arrow_polygon(
     return " ".join(f"{px:.1f},{py:.1f}" for px, py in pts)
 
 
+# ==============================================================================
 def ribbon_path(
     x1: float,
     y1: float,
@@ -445,6 +453,7 @@ def ribbon_path(
     )
 
 
+# ==============================================================================
 def build_legend(
     svg_width: float,
     # svg_height: float,
@@ -502,8 +511,10 @@ def build_legend(
     elements.append(
         f"<defs>"
         f'<linearGradient id="{grad_id}" x1="0" y1="0" x2="1" y2="0">'
-        f'<stop offset="0%"   stop-color="white"  stop-opacity="1"/>'
-        f'<stop offset="100%" stop-color="black"  stop-opacity="1"/>'
+        # f'<stop offset="0%"   stop-color="white"  stop-opacity="1"/>'
+        # f'<stop offset="100%" stop-color="black"  stop-opacity="1"/>'
+        f'<stop offset="0%"   stop-color="{RIBBON_COLOR}"  stop-opacity="0"/>'
+        f'<stop offset="100%" stop-color="{RIBBON_COLOR}"  stop-opacity="1"/>'
         f"</linearGradient>"
         f"</defs>"
     )
@@ -708,18 +719,53 @@ def render_svg(
         track_y_top[cluster["uid"]] = track_y
 
         # Cluster name label
+        # make nicer looking names for each cluster, extracted from filename
+        cluster_name = cluster["name"]
+
+        hyd_name = cluster_name.split(".")[0].split("___")[0]
+        hyd_name = " ".join(hyd_name.split("_"))
+
+        species_name = cluster_name.split(".")[0].split("___")[1]
+        species_name = " ".join(species_name.split("_"))
+
+        genome_and_gene = cluster_name.split(".")[0].split("___")[2:]
+        genome_and_gene = "___".join(genome_and_gene)
+
+        new_cluster_name = f"{hyd_name}; {species_name}; {genome_and_gene}"
+        species_and_genome = f"{species_name} ({genome_and_gene})"
+
+        # # Cluster name label — right-aligned into the label column
         # elements.append(
-        #     f'<text x="{CLUSTER_LABEL_X}" y="{track_y + TRACK_HEIGHT / 2 + 4:.1f}" '
-        #     f'font-family="sans-serif" font-size="12" '
-        #     f'dominant-baseline="middle">{cluster["name"]}</text>'
+        #     f'<text x="{SVG_PADDING + LABEL_COLUMN_WIDTH - 8}" y="{track_y + TRACK_HEIGHT / 2 + 4:.1f}" '
+        #     f'font-family="sans-serif" font-size="14" '
+        #     f'text-anchor="end" '
+        #     # f'dominant-baseline="middle">{cluster["name"]}</text>'
+        #     f'dominant-baseline="middle">{new_cluster_name}</text>'
         # )
 
-        # Cluster name label — right-aligned into the label column
+        # Line 1: hyd_name (normal) + species_name (italic) on same line
+        # Line 2: genome_and_gene underneath, smaller font
+        line1_y = track_y + TRACK_HEIGHT / 2 - 6  # slightly above centre
+        line2_y = line1_y + 16  # second line below
+
+        label_x = SVG_PADDING + LABEL_COLUMN_WIDTH - 8
+
         elements.append(
-            f'<text x="{SVG_PADDING + LABEL_COLUMN_WIDTH - 8}" y="{track_y + TRACK_HEIGHT / 2 + 4:.1f}" '
-            f'font-family="sans-serif" font-size="14" '
-            f'text-anchor="end" '
-            f'dominant-baseline="middle">{cluster["name"]}</text>'
+            f'<text x="{label_x}" '
+            f'font-family="sans-serif" text-anchor="end">'
+            # Line 1: hyd_name + italic species_name
+            f'<tspan x="{label_x}" y="{line1_y:.1f}" font-size="14" font-weight="bold">'
+            f"{hyd_name}"
+            f"</tspan>"
+            # f'<tspan y="{label_x:.1f}" font-size="14" font-style="italic" fill="#555555">'
+            # f"{species_and_genome}"
+            # f"</tspan>"
+            # Line 2: genome/gene identifier, smaller and slightly dimmed
+            f'<tspan x="{label_x:.1f}" y="{line2_y:1f}" font-size="14" font-style="italic" fill="black">'
+            # f'<tspan x="{label_x}" dy="14" font-size="11" fill="#555555">'
+            f"{species_and_genome}"
+            f"</tspan>"
+            f"</text>"
         )
 
         # Track starts after the label column
@@ -867,10 +913,9 @@ def render_svg(
 
         # Ribbon colour from query gene group
         # colour = uid_to_colour.get(q_uid, "#aaaaaa")
-        colour = "#a6adc8"
 
         ribbon_elements.append(
-            f'<path d="{path}" fill="{colour}" opacity="{opacity:.2f}" stroke="none"/>'
+            f'<path d="{path}" fill="{RIBBON_COLOR}" opacity="{opacity:.2f}" stroke="none"/>'
         )
 
     # legend
