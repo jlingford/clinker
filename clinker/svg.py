@@ -7,6 +7,7 @@ Warning: all vibe coded... mileage may vary
 from pathlib import Path
 from typing import Optional
 import colorsys
+from collections import Counter
 
 # ==============================================================================
 # Layout constants — all in pixels
@@ -20,15 +21,121 @@ LABEL_OFFSET = 14  # px above track for gene labels
 CLUSTER_LABEL_X = 10  # x position of cluster name label
 RIBBON_OPACITY_MIN = 0.1
 RIBBON_OPACITY_MAX = 0.8
-SVG_PADDING = 80  # padding around entire figure
+SVG_PADDING = 20  # padding around entire figure
 SCALE = 0.05  # bp -> px scaling factor
 LABEL_COLUMN_WIDTH = 800  # px reserved for cluster name on the left
 # legend constants
-LEGEND_BOTTOM_MARGIN = 60  # extra height below last track for legend
+LEGEND_BOTTOM_MARGIN = 80  # extra height below last track for legend
 SCALEBAR_BP = 2500  # genomic length the scale bar represents
 SCALEBAR_HEIGHT = 8  # tick height in px
 IDENTITY_BAR_WIDTH = 160
 IDENTITY_BAR_HEIGHT = 14
+# color key constants
+LEGEND_SWATCH_SIZE = 14
+LEGEND_ROW_HEIGHT = 20
+LEGEND_HEIGHT = SCALEBAR_HEIGHT + 26  # bar height + text label below it
+LEGEND_COLS = 2
+LEGEND_COL_WIDTH = 400
+TRACK_TO_SCALEBAR_GAP = 10
+SCALEBAR_TO_COLOURKEY_GAP = 40
+
+
+# ==============================================================================
+def build_colour_key(
+    groups: list,
+    group_kofam_labels: dict[str, str],
+    uid_to_colour: dict[str, str],
+    x: float,
+    y: float,
+) -> tuple[list[str], float]:
+    """
+    Renders a colour key for gene groups labelled by representative kofam_id.
+    Only renders groups that have at least one labelled kofam_id.
+    Returns (svg_elements, total_height).
+    """
+    elements = []
+
+    # Collect unique (colour, label) pairs — deduplicate by colour+label
+    seen: set[tuple[str, str]] = set()
+    entries: list[tuple[str, str]] = []  # (colour, label)
+    for group in groups:
+        label = group_kofam_labels.get(group["uid"], "")
+        if not label:
+            continue
+        # Get colour from any member gene
+        colour = next(
+            (uid_to_colour[uid] for uid in group["genes"] if uid in uid_to_colour),
+            None,
+        )
+        if colour is None:
+            continue
+        key = (colour, label)
+        if key not in seen:
+            seen.add(key)
+            entries.append(key)
+
+    if not entries:
+        return [], 0.0
+
+    # Title
+    elements.append(
+        f'<text x="{x:.1f}" y="{y:.1f}" '
+        f'font-family="sans-serif" font-size="14" font-weight="normal">Annotation</text>'
+    )
+    y += 6  # gap after title
+
+    # Swatch rows, two columns
+    for i, (colour, label) in enumerate(entries):
+        col = i % LEGEND_COLS
+        row = i // LEGEND_COLS
+        sx = x + col * LEGEND_COL_WIDTH
+        sy = y + row * LEGEND_ROW_HEIGHT
+
+        # Colour swatch
+        elements.append(
+            f'<rect x="{sx:.1f}" y="{sy:.1f}" '
+            f'width="{LEGEND_SWATCH_SIZE}" height="{LEGEND_SWATCH_SIZE}" '
+            f'fill="{colour}" stroke="black" stroke-width="0.6"/>'
+        )
+        # Label
+        elements.append(
+            f'<text x="{sx + LEGEND_SWATCH_SIZE + 5:.1f}" '
+            f'y="{sy + LEGEND_SWATCH_SIZE - 3:.1f}" '
+            f'font-family="sans-serif" font-size="12">{label}</text>'
+        )
+
+    n_rows = (len(entries) + LEGEND_COLS - 1) // LEGEND_COLS
+    total_height = 6 + n_rows * LEGEND_ROW_HEIGHT
+    return elements, total_height
+
+
+# ==============================================================================
+def build_group_kofam_labels(clusters: list, groups: list) -> dict[str, str]:
+    """
+    For each group, finds the most frequent non-None kofam_id among
+    member genes. Returns group_uid -> kofam_label (or "" if none found).
+    """
+    # Build gene_uid -> kofam_id lookup from cluster data
+    uid_to_kofam: dict[str, str] = {}
+    for cluster in clusters:
+        for locus in cluster["loci"]:
+            for gene in locus["genes"]:
+                kid = gene.get("kofam_id")
+                if kid:
+                    uid_to_kofam[gene["uid"]] = kid
+
+    group_labels: dict[str, str] = {}
+    for group in groups:
+        kofam_hits = [
+            uid_to_kofam[uid] for uid in group["genes"] if uid in uid_to_kofam
+        ]
+        if kofam_hits:
+            most_common, _ = Counter(kofam_hits).most_common(1)[0]
+            group_labels[group["uid"]] = most_common
+        else:
+            group_labels[group["uid"]] = ""
+
+    return group_labels
 
 
 # ==============================================================================
@@ -338,12 +445,17 @@ def ribbon_path(
     )
 
 
-def build_legend(svg_width: float, svg_height: float, scale: float) -> list[str]:
+def build_legend(
+    svg_width: float,
+    # svg_height: float,
+    legend_y: float,
+    scale: float,
+) -> list[str]:
     """Renders scale bar and identity gradient legend."""
     elements = []
 
     legend_x = SVG_PADDING + LABEL_COLUMN_WIDTH
-    legend_y = svg_height - LEGEND_BOTTOM_MARGIN + 10
+    # legend_y = svg_height - LEGEND_BOTTOM_MARGIN + 10
 
     # ------------------------------------------------------------------
     # Scale bar
@@ -442,7 +554,7 @@ def render_svg(
         identity_threshold: Minimum identity to draw a ribbon
     """
     # WARN: test
-    anchor_label = "GB30203_D4993_C5_H3_scaffold_103059_115"
+    # anchor_label = "GB30203_D4993_C5_H3_scaffold_103059_115"
 
     # -------------------------------------------------------
     # 1. Collect plot data via existing Globaligner method
@@ -459,6 +571,11 @@ def render_svg(
     #         uid_to_colour[gene_uid] = group.get("colour") or "#cccccc"
 
     uid_to_colour = build_colour_map(groups)
+
+    group_kofam_labels = build_group_kofam_labels(clusters, groups)
+    n_labelled = sum(1 for v in group_kofam_labels.values() if v)
+    n_key_rows = (n_labelled + LEGEND_COLS - 1) // LEGEND_COLS
+    colour_key_height = 20 + n_key_rows * LEGEND_ROW_HEIGHT  # title + rows
 
     # -------------------------------------------------------
     # 1b. Anchor normalisation (optional)
@@ -544,7 +661,36 @@ def render_svg(
         SVG_PADDING * 2 + LABEL_COLUMN_WIDTH + max_locus_span * scale + SVG_PADDING
     )
     # svg_height = SVG_PADDING * 2 + n_clusters * TRACK_SPACING
-    svg_height = SVG_PADDING * 2 + n_clusters * TRACK_SPACING + LEGEND_BOTTOM_MARGIN
+    # svg_height = SVG_PADDING * 2 + n_clusters * TRACK_SPACING + LEGEND_BOTTOM_MARGIN
+    svg_height = (
+        SVG_PADDING * 2
+        + n_clusters * TRACK_SPACING
+        + LEGEND_HEIGHT
+        + 20
+        + colour_key_height
+        + SVG_PADDING
+        # + LEGEND_BOTTOM_MARGIN
+        # + colour_key_height
+    )
+
+    key_x = SVG_PADDING + LABEL_COLUMN_WIDTH
+    # key_y = svg_height - SVG_PADDING - colour_key_height + 10
+
+    last_track_bottom = SVG_PADDING + n_clusters * TRACK_SPACING
+    # legend_y = svg_height - LEGEND_BOTTOM_MARGIN - colour_key_height + 10
+    legend_y = (
+        last_track_bottom + TRACK_TO_SCALEBAR_GAP
+    )  # gap b/w last track and scale/identity bar
+    key_y = (
+        legend_y + LEGEND_HEIGHT + SCALEBAR_TO_COLOURKEY_GAP
+    )  # gap b/w scale bar and colour key
+
+    # legend_elements = build_legend(svg_width, svg_height, scale)
+    legend_elements = build_legend(svg_width=svg_width, legend_y=legend_y, scale=scale)
+
+    colour_key_elements, _ = build_colour_key(
+        groups, group_kofam_labels, uid_to_colour, key_x, key_y
+    )
 
     elements = []  # accumulate SVG element strings
 
@@ -728,7 +874,7 @@ def render_svg(
         )
 
     # legend
-    legend_elements = build_legend(svg_width, svg_height, scale)
+    # legend_elements = build_legend(svg_width, svg_height, scale)
 
     # -------------------------------------------------------
     # 5. Assemble final SVG
@@ -744,6 +890,8 @@ def render_svg(
         *elements,
         "<!-- legend -->",
         *legend_elements,
+        "<!-- colour key -->",
+        *colour_key_elements,
         "</svg>",
     ]
 
