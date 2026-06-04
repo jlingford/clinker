@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Optional
 import colorsys
 from collections import Counter
+import numpy as np
+import seaborn as sns
 
 # ==============================================================================
 # Layout constants — all in pixels
@@ -111,6 +113,100 @@ def build_colour_key(
 
 
 # ==============================================================================
+def build_kofam_colour_key(
+    clusters: list,
+    uid_to_colour: dict[str, str],
+    kofam_to_colour: dict[str, str],
+    x: float,
+    y: float,
+) -> tuple[list[str], float]:
+    """
+    Colour key for no_align mode: one swatch per unique kofam_id.
+    """
+    # # Collect unique (kofam_id, colour) pairs
+    # seen: set[str] = set()
+    # entries: list[tuple[str, str]] = []  # (label, colour)
+    # for cluster in clusters:
+    #     for locus in cluster["loci"]:
+    #         for gene in locus["genes"]:
+    #             kid = gene.get("kofam_id")
+    #             colour = uid_to_colour.get(gene["uid"], "#dddddd")
+    #             if kid and kid not in seen:
+    #                 seen.add(kid)
+    #                 entries.append((kid, colour))
+    #
+    # if not entries:
+    #     return [], 0.0
+    #
+    # elements = []
+    # elements.append(
+    #     f'<text x="{x:.1f}" y="{y:.1f}" '
+    #     f'font-family="sans-serif" font-size="14" font-weight="normal">Annotation</text>'
+    # )
+    # y += 6
+    #
+    # for i, (label, colour) in enumerate(entries):
+    #     col = i % LEGEND_COLS
+    #     row = i // LEGEND_COLS
+    #     sx = x + col * LEGEND_COL_WIDTH
+    #     sy = y + row * LEGEND_ROW_HEIGHT
+    #
+    #     elements.append(
+    #         f'<rect x="{sx:.1f}" y="{sy:.1f}" '
+    #         f'width="{LEGEND_SWATCH_SIZE}" height="{LEGEND_SWATCH_SIZE}" '
+    #         f'fill="{colour}" stroke="black" stroke-width="0.6"/>'
+    #     )
+    #     elements.append(
+    #         f'<text x="{sx + LEGEND_SWATCH_SIZE + 5:.1f}" '
+    #         f'y="{sy + LEGEND_SWATCH_SIZE - 3:.1f}" '
+    #         f'font-family="sans-serif" font-size="12">{label}</text>'
+    #     )
+    #
+    # n_rows = (len(entries) + LEGEND_COLS - 1) // LEGEND_COLS
+    # total_height = 6 + n_rows * LEGEND_ROW_HEIGHT
+    # return elements, total_height
+
+    # Order entries by palette position (insertion order of kofam_to_colour,
+    # which was built from sorted+enumerated unique_kofams)
+    entries = [
+        (kid, colour)
+        for kid, colour in kofam_to_colour.items()
+        if kid != "None"  # optionally put "None" last
+    ]
+    # Append "None" at the end if present
+    if "None" in kofam_to_colour:
+        entries.append(("None", kofam_to_colour["None"]))
+
+    if not entries:
+        return [], 0.0
+
+    elements = []
+    elements.append(
+        f'<text x="{x:.1f}" y="{y:.1f}" '
+        f'font-family="sans-serif" font-size="14" font-weight="normal">Annotation</text>'
+    )
+    y += 6
+    for i, (label, colour) in enumerate(entries):
+        col = i % LEGEND_COLS
+        row = i // LEGEND_COLS
+        sx = x + col * LEGEND_COL_WIDTH
+        sy = y + row * LEGEND_ROW_HEIGHT
+        elements.append(
+            f'<rect x="{sx:.1f}" y="{sy:.1f}" '
+            f'width="{LEGEND_SWATCH_SIZE}" height="{LEGEND_SWATCH_SIZE}" '
+            f'fill="{colour}" stroke="black" stroke-width="0.6"/>'
+        )
+        elements.append(
+            f'<text x="{sx + LEGEND_SWATCH_SIZE + 5:.1f}" '
+            f'y="{sy + LEGEND_SWATCH_SIZE - 3:.1f}" '
+            f'font-family="sans-serif" font-size="12">{label}</text>'
+        )
+    n_rows = (len(entries) + LEGEND_COLS - 1) // LEGEND_COLS
+    total_height = 6 + n_rows * LEGEND_ROW_HEIGHT
+    return elements, total_height
+
+
+# ==============================================================================
 def build_group_kofam_labels(clusters: list, groups: list) -> dict[str, str]:
     """
     For each group, finds the most frequent non-None kofam_id among
@@ -137,6 +233,82 @@ def build_group_kofam_labels(clusters: list, groups: list) -> dict[str, str]:
             group_labels[group["uid"]] = ""
 
     return group_labels
+
+
+# ==============================================================================
+def build_colour_map(groups: list) -> dict:
+    """
+    Builds a gene_uid -> colour dict from groups.
+    Auto-generates colours for groups where colour is None.
+    """
+    # Count how many groups need auto-colour
+    auto_groups = [g for g in groups if not g.get("colour")]
+    auto_colours = generate_colours(len(auto_groups))
+    auto_iter = iter(auto_colours)
+
+    uid_to_colour = {}
+    for group in groups:
+        colour = group.get("colour") or next(auto_iter)
+        for gene_uid in group["genes"]:
+            uid_to_colour[gene_uid] = colour
+    return uid_to_colour
+
+
+# ==============================================================================
+def build_kofam_colour_map(clusters: list) -> tuple[dict[str, str], dict[str, str]]:
+    """
+    Builds a gene_uid -> colour dict based on shared kofam_id annotations.
+    Genes with the same kofam_id get the same colour.
+    Unannotated genes get a neutral grey.
+    """
+    # NONE_COLOUR = "#838ba7"
+    NONE_COLOUR = "#a6adc8"
+
+    uid_to_kofam: dict[str, str] = {}
+    for cluster in clusters:
+        for locus in cluster["loci"]:
+            for gene in locus["genes"]:
+                kid = gene.get("kofam_id")
+                if kid:
+                    uid_to_kofam[gene["uid"]] = kid
+
+    # Exclude "None" strings from palette generation
+    unique_kofams = sorted(k for k in set(uid_to_kofam.values()) if k != "None")
+    palette = generate_colours(len(unique_kofams))
+    kofam_to_colour: dict[str, str] = dict(zip(unique_kofams, palette))
+    kofam_to_colour["None"] = NONE_COLOUR  # explicit override
+
+    uid_to_colour: dict[str, str] = {}
+    for cluster in clusters:
+        for locus in cluster["loci"]:
+            for gene in locus["genes"]:
+                kid = uid_to_kofam.get(gene["uid"])
+                uid_to_colour[gene["uid"]] = kofam_to_colour.get(kid, "#dddddd")
+
+    return uid_to_colour, kofam_to_colour
+
+
+# ==============================================================================
+def generate_colours(n: int) -> list[str]:
+    """Generates n visually distinct colours using HSL spacing."""
+    # colours = []
+    # for i in range(n):
+    #     hue = i / n
+    #     # Use fixed saturation/lightness similar to clustermap.js defaults
+    #     r, g, b = colorsys.hls_to_rgb(hue, 0.6, 0.7)
+    #     colours.append(
+    #         "#{:02x}{:02x}{:02x}".format(int(r * 255), int(g * 255), int(b * 255))
+    #     )
+    # return colours
+    cmap = sns.color_palette("Spectral", as_cmap=True)
+    colours = []
+    for i in range(n):
+        t = i / max(n - 1, 1)  # evenly space from 0.0 to 1.0
+        r, g, b, *_ = cmap(t)
+        colours.append(
+            "#{:02x}{:02x}{:02x}".format(int(r * 255), int(g * 255), int(b * 255))
+        )
+    return colours
 
 
 # ==============================================================================
@@ -306,39 +478,6 @@ def identity_to_opacity(identity: float) -> float:
 #         if gene_uid in group["genes"]:
 #             return group["colour"] or "#cccccc"
 #     return "#dddddd"  # ungrouped genes
-
-
-# ==============================================================================
-def generate_colours(n: int) -> list[str]:
-    """Generates n visually distinct colours using HSL spacing."""
-    colours = []
-    for i in range(n):
-        hue = i / n
-        # Use fixed saturation/lightness similar to clustermap.js defaults
-        r, g, b = colorsys.hls_to_rgb(hue, 0.6, 0.7)
-        colours.append(
-            "#{:02x}{:02x}{:02x}".format(int(r * 255), int(g * 255), int(b * 255))
-        )
-    return colours
-
-
-# ==============================================================================
-def build_colour_map(groups: list) -> dict:
-    """
-    Builds a gene_uid -> colour dict from groups.
-    Auto-generates colours for groups where colour is None.
-    """
-    # Count how many groups need auto-colour
-    auto_groups = [g for g in groups if not g.get("colour")]
-    auto_colours = generate_colours(len(auto_groups))
-    auto_iter = iter(auto_colours)
-
-    uid_to_colour = {}
-    for group in groups:
-        colour = group.get("colour") or next(auto_iter)
-        for gene_uid in group["genes"]:
-            uid_to_colour[gene_uid] = colour
-    return uid_to_colour
 
 
 # ==============================================================================
@@ -552,6 +691,7 @@ def render_svg(
     identity_threshold: float = 0.3,
     # anchor_label: str | None = None,
     anchor_map: dict[str, str] | None = None,
+    no_align: bool = True,
 ) -> None:
     """
     Renders a clinker Globaligner as a static SVG file.
@@ -581,12 +721,48 @@ def render_svg(
     #     for gene_uid in group["genes"]:
     #         uid_to_colour[gene_uid] = group.get("colour") or "#cccccc"
 
-    uid_to_colour = build_colour_map(groups)
+    # # uid_to_colour = build_colour_map(groups)
+    # if no_align:
+    #     uid_to_colour = build_kofam_colour_map(clusters)
+    # else:
+    #     uid_to_colour = build_colour_map(groups)
+    # # NOTE: fix this
+    # group_kofam_labels = build_group_kofam_labels(clusters, groups)
+    # n_labelled = sum(1 for v in group_kofam_labels.values() if v)
+    # n_key_rows = (n_labelled + LEGEND_COLS - 1) // LEGEND_COLS
+    # colour_key_height = 20 + n_key_rows * LEGEND_ROW_HEIGHT  # title + rows
+    if no_align:
+        uid_to_colour, kofam_to_colour = build_kofam_colour_map(clusters)
+        # Count unique annotated kofam IDs for height pre-calculation
+        unique_kofams = {
+            gene.get("kofam_id")
+            for cluster in clusters
+            for locus in cluster["loci"]
+            for gene in locus["genes"]
+            if gene.get("kofam_id")
+        }
+        n_key_rows = (len(unique_kofams) + LEGEND_COLS - 1) // LEGEND_COLS
+    else:
+        uid_to_colour = build_colour_map(groups)
+        group_kofam_labels = build_group_kofam_labels(clusters, groups)
+        n_labelled = sum(1 for v in group_kofam_labels.values() if v)
+        n_key_rows = (n_labelled + LEGEND_COLS - 1) // LEGEND_COLS
 
-    group_kofam_labels = build_group_kofam_labels(clusters, groups)
-    n_labelled = sum(1 for v in group_kofam_labels.values() if v)
-    n_key_rows = (n_labelled + LEGEND_COLS - 1) // LEGEND_COLS
-    colour_key_height = 20 + n_key_rows * LEGEND_ROW_HEIGHT  # title + rows
+    colour_key_height = (
+        20 + n_key_rows * LEGEND_ROW_HEIGHT
+    )  # always set before svg_height
+
+    # collect set of target genes
+    target_uids: set[str] = set()
+    if anchor_map:
+        for cluster in clusters:
+            anchor_label = anchor_map.get(cluster["name"])
+            if anchor_label is None:
+                continue
+            for locus in cluster["loci"]:
+                for gene in locus["genes"]:
+                    if gene.get("label") == anchor_label:
+                        target_uids.add(gene["uid"])
 
     # -------------------------------------------------------
     # 1b. Anchor normalisation (optional)
@@ -699,9 +875,26 @@ def render_svg(
     # legend_elements = build_legend(svg_width, svg_height, scale)
     legend_elements = build_legend(svg_width=svg_width, legend_y=legend_y, scale=scale)
 
-    colour_key_elements, _ = build_colour_key(
-        groups, group_kofam_labels, uid_to_colour, key_x, key_y
-    )
+    if no_align:
+        colour_key_elements, colour_key_height = build_kofam_colour_key(
+            clusters,
+            uid_to_colour,
+            kofam_to_colour,
+            key_x,
+            key_y,
+        )
+        # n_key_rows = (len(colour_key_elements) + LEGEND_COLS - 1) // LEGEND_COLS
+    else:
+        colour_key_elements, _ = build_colour_key(
+            groups,
+            group_kofam_labels,
+            uid_to_colour,
+            key_x,
+            key_y,
+        )
+    # colour_key_elements, _ = build_colour_key(
+    #     groups, group_kofam_labels, uid_to_colour, key_x, key_y
+    # )
 
     elements = []  # accumulate SVG element strings
 
@@ -830,9 +1023,15 @@ def render_svg(
                     continue
 
                 # NOTE: this controls the look of gene arrows
+                # NOTE: make target genes have a slightly thicker line border
+                arrow_stroke_width = (
+                    ARROW_STROKE_WIDTH * 2
+                    if gene["uid"] in target_uids
+                    else ARROW_STROKE_WIDTH
+                )
                 elements.append(
                     f'<polygon points="{pts}" '
-                    f'fill="{colour}" stroke="{ARROW_STROKE_COLOUR}" stroke-width="{ARROW_STROKE_WIDTH}" '
+                    f'fill="{colour}" stroke="{ARROW_STROKE_COLOUR}" stroke-width="{arrow_stroke_width}" '
                     f'opacity="{ARROW_BODY_OPACITY}"/>'
                 )
 
