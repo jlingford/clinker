@@ -25,7 +25,7 @@ RIBBON_OPACITY_MIN = 0.0
 RIBBON_OPACITY_MAX = 1.0
 RIBBON_COLOR = "#a6adc8"
 SVG_PADDING = 20  # padding around entire figure
-SCALE = 0.05  # bp -> px scaling factor
+SCALE = 0.032  # bp -> px scaling factor
 LABEL_COLUMN_WIDTH = 480  # px reserved for cluster name on the left
 # legend constants
 LEGEND_BOTTOM_MARGIN = 80  # extra height below last track for legend
@@ -911,21 +911,39 @@ def render_svg(
         track_y = SVG_PADDING + cluster_idx * TRACK_SPACING
         track_y_top[cluster["uid"]] = track_y
 
-        # Cluster name label
+        # CLUSTER NAME LABEL
         # make nicer looking names for each cluster, extracted from filename
+        # FIX: extract info from genbank file itself (need to update genbank contruction script)
+        # This is using gbk_renamer.sh method (not ideal)
+        # cluster_name = cluster["name"]
+        #
+        # hyd_name = cluster_name.split(".")[0].split("___")[0]
+        # hyd_name = " ".join(hyd_name.split("_"))
+        #
+        # species_name = cluster_name.split(".")[0].split("___")[1]
+        # species_name = " ".join(species_name.split("_"))
+        #
+        # genome_and_gene = cluster_name.split(".")[0].split("___")[2:]
+        # genome_and_gene = "___".join(genome_and_gene)
+        #
+        # new_cluster_name = f"{hyd_name}; {species_name}; {genome_and_gene}"
+        # species_and_genome = f"{species_name} ({genome_and_gene})"
+
+        # FIX: NEW way
+        # genbank files are renamed so that the name is:
+        # GENOMEID___GENENUM.HydGroup.Species_name.suffix.gbk
         cluster_name = cluster["name"]
 
-        hyd_name = cluster_name.split(".")[0].split("___")[0]
+        hyd_name = cluster_name.split(".")[1]
         hyd_name = " ".join(hyd_name.split("_"))
 
-        species_name = cluster_name.split(".")[0].split("___")[1]
+        species_name = cluster_name.split(".")[2]
         species_name = " ".join(species_name.split("_"))
 
-        genome_and_gene = cluster_name.split(".")[0].split("___")[2:]
-        genome_and_gene = "___".join(genome_and_gene)
+        genome_and_gene = cluster_name.split(".")[0]
 
         new_cluster_name = f"{hyd_name}; {species_name}; {genome_and_gene}"
-        species_and_genome = f"{species_name} ({genome_and_gene})"
+        species_and_genome = f"{species_name}; {genome_and_gene}"
 
         # # Cluster name label — right-aligned into the label column
         # elements.append(
@@ -947,16 +965,17 @@ def render_svg(
             f'<text x="{label_x}" '
             f'font-family="sans-serif" text-anchor="end">'
             # Line 1: hyd_name + italic species_name
-            f'<tspan x="{label_x}" y="{line1_y:.1f}" font-size="14" font-weight="bold">'
-            f"{hyd_name}"
+            f'<tspan x="{label_x:.1f}" y="{line2_y:1f}" font-size="14" font-style="italic" fill="black">'
+            # f'<tspan x="{label_x}" dy="14" font-size="11" fill="#555555">'
+            f"{species_and_genome}"
             f"</tspan>"
             # f'<tspan y="{label_x:.1f}" font-size="14" font-style="italic" fill="#555555">'
             # f"{species_and_genome}"
             # f"</tspan>"
             # Line 2: genome/gene identifier, smaller and slightly dimmed
-            f'<tspan x="{label_x:.1f}" y="{line2_y:1f}" font-size="14" font-style="italic" fill="black">'
-            # f'<tspan x="{label_x}" dy="14" font-size="11" fill="#555555">'
-            f"{species_and_genome}"
+            # f'<tspan x="{label_x}" y="{line1_y:.1f}" font-size="14" font-weight="bold">'
+            f'<tspan x="{label_x}" y="{line1_y:.1f}" font-size="14">'
+            f"{hyd_name}"
             f"</tspan>"
             f"</text>"
         )
